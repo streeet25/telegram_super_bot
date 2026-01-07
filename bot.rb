@@ -297,51 +297,153 @@ def find_executable(executable_name)
   nil
 end
 
+def extract_tweet_id(twitter_url)
+  match = twitter_url.match(%r{/(?:status|statuses)/(\d+)})
+  match && match[1]
+end
+
+def download_twitter_screenshot(twitter_url)
+  tweet_id = extract_tweet_id(twitter_url)
+  return nil unless tweet_id
+
+  python_path = find_executable("python3")
+  return nil unless python_path
+
+  script_path = File.expand_path("scripts/tweet_screenshot.py", __dir__)
+  return nil unless File.file?(script_path)
+
+  tmp_dir = Dir.mktmpdir("tw_shot_")
+  output_path = File.join(tmp_dir, "#{tweet_id}.png")
+  embed_url = "https://platform.twitter.com/embed/Tweet.html?id=#{tweet_id}"
+
+  stdout, stderr, status = Open3.capture3(python_path, script_path, embed_url, output_path)
+  unless status.success?
+    error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+    puts "tweet screenshot error: #{error_output}"
+    FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+    return nil
+  end
+
+  return output_path if File.exist?(output_path)
+
+  FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+  nil
+end
+
+def transcode_video_to_fit(input_path, max_filesize_bytes)
+  return input_path unless max_filesize_bytes && File.size(input_path) > max_filesize_bytes
+
+  ffmpeg_path = find_executable("ffmpeg")
+  unless ffmpeg_path
+    puts "ffmpeg not found; cannot reduce video size."
+    return nil
+  end
+
+  base_dir = File.dirname(input_path)
+  base_name = File.basename(input_path, ".*")
+  steps = [
+    { height: 720, crf: 28 },
+    { height: 720, crf: 30 },
+    { height: 480, crf: 30 },
+    { height: 480, crf: 32 },
+    { height: 360, crf: 32 }
+  ]
+
+  steps.each do |step|
+    output_path = File.join(base_dir, "#{base_name}_#{step[:height]}p_crf#{step[:crf]}.mp4")
+    cmd = [
+      ffmpeg_path,
+      "-y",
+      "-i", input_path,
+      "-vf", "scale=-2:#{step[:height]}:force_original_aspect_ratio=decrease",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", step[:crf].to_s,
+      "-c:a", "aac",
+      "-b:a", "128k",
+      output_path
+    ]
+
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+      puts "ffmpeg error (#{step[:height]}p): #{error_output}" unless error_output.empty?
+      File.delete(output_path) if File.exist?(output_path)
+      next
+    end
+
+    if File.size(output_path) <= max_filesize_bytes
+      File.delete(input_path) if File.exist?(input_path)
+      return output_path
+    end
+
+    File.delete(output_path) if File.exist?(output_path)
+  end
+
+  nil
+end
+
 def download_video_with_ytdlp(post_url, tmp_prefix)
   ytdlp_path = find_executable("yt-dlp")
   return nil unless ytdlp_path
 
-  tmp_dir = Dir.mktmpdir(tmp_prefix)
-  output_template = File.join(tmp_dir, "%(id)s.%(ext)s")
-  cmd = [
-    ytdlp_path,
-    "--no-playlist",
-    "--no-warnings",
-    "--no-progress",
-    "-f", "mp4/best",
-    "-o", output_template
-  ]
+  max_filesize_mb = (ENV["YTDLP_MAX_FILESIZE_MB"] || "48").to_i
+  max_filesize_mb = 0 if max_filesize_mb.negative?
+  max_filesize_bytes = max_filesize_mb.positive? ? max_filesize_mb * 1024 * 1024 : nil
+
+  format_candidates = ["best"]
 
   cookies_file = ENV["YTDLP_COOKIES_FILE"]
-  if cookies_file && !cookies_file.strip.empty?
-    cmd.concat(["--cookies", cookies_file])
-  else
-    cookies_browser = ENV["YTDLP_COOKIES_FROM_BROWSER"]
-    if cookies_browser && !cookies_browser.strip.empty?
+  cookies_file = nil if cookies_file && cookies_file.strip.empty?
+  cookies_browser = ENV["YTDLP_COOKIES_FROM_BROWSER"]
+  cookies_browser = nil if cookies_browser && cookies_browser.strip.empty?
+
+  format_candidates.each do |format|
+    tmp_dir = Dir.mktmpdir(tmp_prefix)
+    output_template = File.join(tmp_dir, "%(id)s.%(ext)s")
+    cmd = [
+      ytdlp_path,
+      "--no-playlist",
+      "--no-warnings",
+      "--no-progress",
+      "-f", format,
+      "-o", output_template
+    ]
+    if cookies_file
+      cmd.concat(["--cookies", cookies_file])
+    elsif cookies_browser
       cmd.concat(["--cookies-from-browser", cookies_browser])
     end
-  end
+    cmd << post_url
 
-  cmd << post_url
+    stdout, stderr, status = Open3.capture3(*cmd)
+    unless status.success?
+      error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+      puts "yt-dlp error (format #{format}): #{error_output}" unless error_output.empty?
+      FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+      next
+    end
 
-  stdout, stderr, status = Open3.capture3(*cmd)
-  unless status.success?
-    error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
-    puts "yt-dlp error: #{error_output}"
+    candidates = Dir.glob(File.join(tmp_dir, "*")).select do |path|
+      File.file?(path) && File.extname(path).downcase != ".part"
+    end
+    if candidates.empty?
+      puts "yt-dlp did not produce a video file."
+      FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+      next
+    end
+
+    selected = candidates.find { |path| File.extname(path).downcase == ".mp4" } || candidates.first
+    adjusted = transcode_video_to_fit(selected, max_filesize_bytes)
+    if adjusted
+      return adjusted
+    end
+
     FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
-    return nil
+    next
   end
 
-  candidates = Dir.glob(File.join(tmp_dir, "*")).select do |path|
-    File.file?(path) && File.extname(path).downcase != ".part"
-  end
-  if candidates.empty?
-    puts "yt-dlp did not produce a video file."
-    FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
-    return nil
-  end
-
-  candidates.find { |path| File.extname(path).downcase == ".mp4" } || candidates.first
+  nil
 end
 
 def download_instagram_video_with_ytdlp(post_url)
@@ -621,6 +723,31 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         )
       end
       next
+    end
+
+    # --- 4) Фото команды для Twitter ---
+    if is_bot_mentioned && text.downcase.include?("фото")
+      twitter_links = text.scan(TWITTER_REGEX).flatten
+      if twitter_links.any?
+        twitter_links.each do |link|
+          screenshot_path = download_twitter_screenshot(link)
+          if screenshot_path && File.exist?(screenshot_path)
+            begin
+              bot.api.send_photo(
+                chat_id: chat_id,
+                photo: Faraday::UploadIO.new(screenshot_path, "image/png"),
+                caption: "Фото из Twitter"
+              )
+            rescue => e
+              puts "Ошибка отправки в Telegram (Twitter фото): #{e.message}"
+            ensure
+              File.delete(screenshot_path) if File.exist?(screenshot_path)
+              Dir.rmdir(File.dirname(screenshot_path)) rescue nil
+            end
+          end
+        end
+        next
+      end
     end
 
     # --- 1) Twitter / X ссылки ---
