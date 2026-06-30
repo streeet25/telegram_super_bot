@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*cookies*.txt
+
+# Runtime state
+user_locations.json
+reminders.json
+*.log
+
+# Bundler and Ruby tooling
+.bundle/
+vendor/bundle/
+.ruby-lsp/
+.yardoc/
+coverage/
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.part
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/

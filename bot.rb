@@ -7,23 +7,26 @@ require 'json'
 require 'fileutils'
 require 'securerandom'
 require 'open3'
-require 'tzinfo'     # Для работы с часовыми поясами
-require 'tzinfo/data' # Для данных о часовых поясах и DST
+require 'uri'
+require 'tzinfo'     # Time zone support
+require 'tzinfo/data' # Time zone and DST data
 require 'time'
 require 'thread'
 require 'tmpdir'
 
-TOKEN = '7618785354:AAHNWC6a5aOKL_jVaigwUkAKzbg0L5PVa_k'
+TOKEN = ENV.fetch("TELEGRAM_BOT_TOKEN") do
+  abort "TELEGRAM_BOT_TOKEN is required. Export it before starting the bot."
+end
 
-# Константа для файла хранения данных пользователей
+# Stores user location preferences.
 USER_LOCATION_FILE = 'user_locations.json'
 
-# Регулярное выражение для поиска ссылок на Twitter
+# Finds Twitter/X links in incoming messages.
 TWITTER_REGEX = %r{
-  (https?://           # Протокол http:// или https://
-    (?:www\.)?         # Необязательная часть: www.
-    (?:twitter|x)\.com # twitter.com или x.com
-    /[^\s]+)           # Любые символы, кроме пробела, до конца ссылки
+  (https?://           # http:// or https://
+    (?:www\.)?         # Optional www. prefix
+    (?:twitter|x)\.com # twitter.com or x.com
+    /[^\s]+)           # Link path until whitespace
 }ix
 
 INSTAGRAM_REGEX = %r{
@@ -38,6 +41,26 @@ REMINDERS_FILE = 'reminders.json'
 
 # Reminder command format detection regex
 REMINDER_REGEX = /^(?:задрочи|оповести|напомни)\s+время\s+(\d{1,2})(?::(\d{2}))?\s*(?:по\s+(.+?))?\s+(.+)$/i
+
+MAX_MEDIA_LINKS_PER_MESSAGE = [(ENV["MAX_MEDIA_LINKS_PER_MESSAGE"] || "2").to_i, 1].max
+MEDIA_QUEUE_SIZE = [(ENV["MEDIA_QUEUE_SIZE"] || "4").to_i, 1].max
+MEDIA_WORKER_COUNT = [[(ENV["MEDIA_WORKER_COUNT"] || "1").to_i, 1].max, 4].min
+
+YTDLP_MAX_FILESIZE_MB = [(ENV["YTDLP_MAX_FILESIZE_MB"] || "48").to_i, 0].max
+YTDLP_MAX_FILESIZE_BYTES = YTDLP_MAX_FILESIZE_MB.positive? ? YTDLP_MAX_FILESIZE_MB * 1024 * 1024 : nil
+YTDLP_MAX_DURATION_SECONDS = [(ENV["YTDLP_MAX_DURATION_SECONDS"] || "600").to_i, 0].max
+YTDLP_PROBE_TIMEOUT_SECONDS = [(ENV["YTDLP_PROBE_TIMEOUT_SECONDS"] || "20").to_i, 5].max
+YTDLP_DOWNLOAD_TIMEOUT_SECONDS = [(ENV["YTDLP_DOWNLOAD_TIMEOUT_SECONDS"] || "90").to_i, 15].max
+YTDLP_SOCKET_TIMEOUT_SECONDS = [(ENV["YTDLP_SOCKET_TIMEOUT_SECONDS"] || "15").to_i, 5].max
+FFMPEG_TIMEOUT_SECONDS = [(ENV["FFMPEG_TIMEOUT_SECONDS"] || "120").to_i, 15].max
+SCREENSHOT_TIMEOUT_SECONDS = [(ENV["SCREENSHOT_TIMEOUT_SECONDS"] || "30").to_i, 5].max
+DOWNLOAD_DIR_LIMIT_MULTIPLIER = 2
+ENABLE_INSTAGRAM_LEGACY_FETCH = ENV["ENABLE_INSTAGRAM_LEGACY_FETCH"] == "1"
+DROP_PENDING_UPDATES_ON_START = ENV["TELEGRAM_DROP_PENDING_UPDATES_ON_START"] == "1"
+
+class MediaDownloadBlocked < StandardError; end
+
+CommandResult = Struct.new(:stdout, :stderr, :status, :timed_out, :limit_exceeded, keyword_init: true)
 
 # Functions for managing reminders
 
@@ -185,6 +208,87 @@ def format_reminder_time(time_str, timezone)
   "#{local_time.strftime('%H:%M')} по #{timezone_name}"
 end
 
+def safe_send_message(bot, chat_id, text)
+  bot.api.send_message(chat_id: chat_id, text: text)
+rescue => e
+  puts "Ошибка отправки сообщения в Telegram: #{e.class}: #{e.message}"
+end
+
+def directory_size_bytes(path)
+  return 0 unless path && Dir.exist?(path)
+
+  Dir.glob(File.join(path, "**", "*")).sum do |entry|
+    File.file?(entry) ? File.size(entry) : 0
+  rescue
+    0
+  end
+end
+
+def terminate_process_group(pid, signal)
+  Process.kill(signal, -pid)
+rescue Errno::ESRCH
+  nil
+rescue Errno::EPERM, NotImplementedError
+  begin
+    Process.kill(signal, pid)
+  rescue Errno::ESRCH
+    nil
+  end
+end
+
+def run_command_with_limits(*cmd, timeout_seconds:, watched_dir: nil, max_dir_bytes: nil)
+  stdout_data = +""
+  stderr_data = +""
+  status = nil
+  timed_out = false
+  limit_exceeded = false
+
+  Open3.popen3(*cmd, pgroup: true) do |stdin, stdout, stderr, wait_thr|
+    stdin.close
+    stdout_reader = Thread.new { stdout.read }
+    stderr_reader = Thread.new { stderr.read }
+    deadline = Time.now + timeout_seconds
+
+    loop do
+      break if wait_thr.join(0.25)
+
+      if Time.now >= deadline
+        timed_out = true
+        terminate_process_group(wait_thr.pid, "TERM")
+        break
+      end
+
+      if max_dir_bytes && watched_dir && directory_size_bytes(watched_dir) > max_dir_bytes
+        limit_exceeded = true
+        terminate_process_group(wait_thr.pid, "TERM")
+        break
+      end
+    end
+
+    unless wait_thr.join(5)
+      terminate_process_group(wait_thr.pid, "KILL")
+      wait_thr.join
+    end
+
+    stdout_data = stdout_reader.value
+    stderr_data = stderr_reader.value
+    status = wait_thr.value
+  end
+
+  CommandResult.new(
+    stdout: stdout_data,
+    stderr: stderr_data,
+    status: status,
+    timed_out: timed_out,
+    limit_exceeded: limit_exceeded
+  )
+end
+
+def command_error_output(result)
+  error_output = result.stderr.to_s.strip
+  error_output.empty? ? result.stdout.to_s.strip : error_output
+end
+
 
 module InstagramEndpoints
   GetByPost    = "/"               # GET /<postId>
@@ -231,7 +335,7 @@ class InstagramClient
   private
 
   def encode_graphql_request_data(post_id)
-    doc_id = "123456789012345"  # пример ID
+    doc_id = "123456789012345"  # Example ID
     variables = { "postId" => post_id }
 
     URI.encode_www_form(
@@ -243,46 +347,60 @@ end
 
 
 def download_instagram_video_legacy(post_url)
+  unless ENABLE_INSTAGRAM_LEGACY_FETCH
+    puts "legacy Instagram fetch disabled; set ENABLE_INSTAGRAM_LEGACY_FETCH=1 to enable"
+    return nil
+  end
+
   begin
-    puts "Instagram-ссылка: #{post_url}"
+    puts "Instagram link: #{post_url}"
     uri = URI.parse(post_url)
-    post_id = uri.path.sub("/", "")  # упрощённо: "/p/abc123" => "p/abc123"
+    post_id = uri.path.sub("/", "")  # Simplified: "/p/abc123" => "p/abc123"
 
     client = InstagramClient.new
 
-    # 1) Если нужно, загружаем HTML
+    # 1) Load HTML if needed.
     page_html = client.get_post_page_html(post_id)
-    # (Можно доп. логику, если нужно.)
+    # Add more parsing logic here if needed.
 
-    # 2) Запрашиваем GraphQL
+    # 2) Request GraphQL data.
     graphql_data = client.get_post_graphql_data(post_id)
-    # Ищем video_url
+    # Look for video_url.
     video_url = dig_instagram_video_url(graphql_data)
     return nil unless video_url
 
-    # 3) Скачиваем
+    # 3) Download the media.
     file_name = SecureRandom.hex(10) + ".mp4"
     tmp_dir   = File.join(Dir.tmpdir, "ig_video_#{Time.now.to_i}_#{SecureRandom.hex(4)}")
     FileUtils.mkdir_p(tmp_dir)
 
-    puts "Скачиваем файл: #{video_url}"
-    response = Faraday.get(video_url)
+    puts "Downloading file: #{video_url}"
+    response = Faraday.get(video_url) do |req|
+      req.options.open_timeout = YTDLP_SOCKET_TIMEOUT_SECONDS
+      req.options.timeout = YTDLP_DOWNLOAD_TIMEOUT_SECONDS
+    end
     if response.status == 200
+      if YTDLP_MAX_FILESIZE_BYTES && response.body.bytesize > YTDLP_MAX_FILESIZE_BYTES
+        raise MediaDownloadBlocked, "Видео больше лимита #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
+      end
+
       download_path = File.join(tmp_dir, file_name)
       File.open(download_path, "wb") { |f| f.write(response.body) }
-      puts "Instagram видео => #{download_path}"
+      puts "Instagram video => #{download_path}"
       return download_path
     else
-      puts "Ошибка HTTP при загрузке видео: #{response.status}"
+      puts "HTTP error while downloading video: #{response.status}"
       return nil
     end
+  rescue MediaDownloadBlocked
+    raise
   rescue => e
-    puts "Ошибка при скачивании Instagram: #{e.message}"
+    puts "Instagram download error: #{e.message}"
     return nil
   end
 end
 
-# Пример «раскопки» JSON — в реальном коде нужно смотреть фактическую структуру
+# Example JSON lookup. Real API responses may require structure-specific parsing.
 def dig_instagram_video_url(graphql_data)
   media = graphql_data.dig("data", "post", "media")
   return nil unless media && media["is_video"]
@@ -297,14 +415,31 @@ def find_executable(executable_name)
   nil
 end
 
+def normalize_twitter_url(twitter_url)
+  uri = URI.parse(twitter_url)
+  return twitter_url unless uri.host
+
+  if uri.host.downcase.end_with?("x.com")
+    uri.host = "twitter.com"
+  end
+  uri.query = nil
+  uri.fragment = nil
+  uri.to_s
+rescue URI::InvalidURIError
+  twitter_url
+end
+
 def extract_tweet_id(twitter_url)
   match = twitter_url.match(%r{/(?:status|statuses)/(\d+)})
   match && match[1]
 end
 
 def download_twitter_screenshot(twitter_url)
-  tweet_id = extract_tweet_id(twitter_url)
-  return nil unless tweet_id
+  normalized_url = normalize_twitter_url(twitter_url)
+  tweet_id = extract_tweet_id(normalized_url)
+  unless tweet_id
+    raise MediaDownloadBlocked, "Фото делаю только для ссылок на твиты. Twitter/X broadcast/live URL пропускаю."
+  end
 
   python_path = find_executable("python3")
   return nil unless python_path
@@ -316,9 +451,21 @@ def download_twitter_screenshot(twitter_url)
   output_path = File.join(tmp_dir, "#{tweet_id}.png")
   embed_url = "https://platform.twitter.com/embed/Tweet.html?id=#{tweet_id}"
 
-  stdout, stderr, status = Open3.capture3(python_path, script_path, embed_url, output_path)
-  unless status.success?
-    error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+  result = run_command_with_limits(
+    python_path,
+    script_path,
+    embed_url,
+    output_path,
+    timeout_seconds: SCREENSHOT_TIMEOUT_SECONDS
+  )
+  if result.timed_out
+    puts "tweet screenshot timeout after #{SCREENSHOT_TIMEOUT_SECONDS}s"
+    FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+    return nil
+  end
+
+  unless result.status&.success?
+    error_output = command_error_output(result)
     puts "tweet screenshot error: #{error_output}"
     FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
     return nil
@@ -364,9 +511,15 @@ def transcode_video_to_fit(input_path, max_filesize_bytes)
       output_path
     ]
 
-    stdout, stderr, status = Open3.capture3(*cmd)
-    unless status.success?
-      error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+    result = run_command_with_limits(*cmd, timeout_seconds: FFMPEG_TIMEOUT_SECONDS)
+    if result.timed_out
+      puts "ffmpeg timeout after #{FFMPEG_TIMEOUT_SECONDS}s (#{step[:height]}p)"
+      File.delete(output_path) if File.exist?(output_path)
+      next
+    end
+
+    unless result.status&.success?
+      error_output = command_error_output(result)
       puts "ffmpeg error (#{step[:height]}p): #{error_output}" unless error_output.empty?
       File.delete(output_path) if File.exist?(output_path)
       next
@@ -383,20 +536,110 @@ def transcode_video_to_fit(input_path, max_filesize_bytes)
   nil
 end
 
-def download_video_with_ytdlp(post_url, tmp_prefix)
-  ytdlp_path = find_executable("yt-dlp")
-  return nil unless ytdlp_path
-
-  max_filesize_mb = (ENV["YTDLP_MAX_FILESIZE_MB"] || "48").to_i
-  max_filesize_mb = 0 if max_filesize_mb.negative?
-  max_filesize_bytes = max_filesize_mb.positive? ? max_filesize_mb * 1024 * 1024 : nil
-
-  format_candidates = ["best"]
-
+def ytdlp_cookie_args
   cookies_file = ENV["YTDLP_COOKIES_FILE"]
   cookies_file = nil if cookies_file && cookies_file.strip.empty?
   cookies_browser = ENV["YTDLP_COOKIES_FROM_BROWSER"]
   cookies_browser = nil if cookies_browser && cookies_browser.strip.empty?
+
+  if cookies_file
+    ["--cookies", cookies_file]
+  elsif cookies_browser
+    ["--cookies-from-browser", cookies_browser]
+  else
+    []
+  end
+end
+
+def ytdlp_network_args
+  [
+    "--socket-timeout", YTDLP_SOCKET_TIMEOUT_SECONDS.to_s,
+    "--retries", "1",
+    "--fragment-retries", "1"
+  ]
+end
+
+def parse_ytdlp_json(stdout)
+  json_line = stdout.to_s.lines.reverse.map(&:strip).find { |line| line.start_with?("{") }
+  return nil unless json_line
+
+  JSON.parse(json_line)
+rescue JSON::ParserError => e
+  puts "yt-dlp metadata parse error: #{e.message}"
+  nil
+end
+
+def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args)
+  cmd = [
+    ytdlp_path,
+    "--no-playlist",
+    "--no-warnings",
+    "--no-progress",
+    "--dump-json",
+    "--skip-download",
+    *ytdlp_network_args,
+    *cookie_args,
+    post_url
+  ]
+
+  result = run_command_with_limits(*cmd, timeout_seconds: YTDLP_PROBE_TIMEOUT_SECONDS)
+  if result.timed_out
+    raise MediaDownloadBlocked, "Ссылка слишком долго отдает метаданные. Пропускаю, чтобы не подвесить бота."
+  end
+
+  unless result.status&.success?
+    error_output = command_error_output(result)
+    puts "yt-dlp metadata error: #{error_output}" unless error_output.empty?
+    return nil
+  end
+
+  parse_ytdlp_json(result.stdout)
+end
+
+def live_media_info?(info)
+  live_status = info["live_status"].to_s.downcase
+  return true if info["is_live"] == true
+  return true if %w[is_live is_upcoming was_live post_live].include?(live_status)
+
+  live_status.include?("live") && live_status != "not_live"
+end
+
+def media_filesize_bytes(info)
+  [info["filesize"], info["filesize_approx"]].compact.map(&:to_i).max
+end
+
+def validate_ytdlp_media_info!(info)
+  return unless info
+
+  if live_media_info?(info)
+    raise MediaDownloadBlocked, "Трансляции и live-видео не скачиваю, чтобы не перегружать сервер."
+  end
+
+  duration = info["duration"].to_f
+  if YTDLP_MAX_DURATION_SECONDS.positive? && duration.positive? && duration > YTDLP_MAX_DURATION_SECONDS
+    minutes = (YTDLP_MAX_DURATION_SECONDS / 60.0).round(1)
+    raise MediaDownloadBlocked, "Видео длиннее лимита #{minutes} мин., пропускаю."
+  end
+
+  filesize = media_filesize_bytes(info)
+  if YTDLP_MAX_FILESIZE_BYTES && filesize && filesize > YTDLP_MAX_FILESIZE_BYTES
+    raise MediaDownloadBlocked, "Видео больше лимита #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
+  end
+end
+
+def download_video_with_ytdlp(post_url, tmp_prefix)
+  ytdlp_path = find_executable("yt-dlp")
+  return nil unless ytdlp_path
+
+  cookie_args = ytdlp_cookie_args
+  media_info = probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args)
+  return nil unless media_info
+
+  validate_ytdlp_media_info!(media_info)
+
+  default_format = "best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best"
+  configured_format = ENV["YTDLP_FORMAT"].to_s.strip
+  format_candidates = [configured_format.empty? ? default_format : configured_format]
 
   format_candidates.each do |format|
     tmp_dir = Dir.mktmpdir(tmp_prefix)
@@ -406,19 +649,35 @@ def download_video_with_ytdlp(post_url, tmp_prefix)
       "--no-playlist",
       "--no-warnings",
       "--no-progress",
+      "--match-filter", "!is_live",
+      "--concurrent-fragments", "1",
+      "--merge-output-format", "mp4",
+      *ytdlp_network_args,
       "-f", format,
       "-o", output_template
     ]
-    if cookies_file
-      cmd.concat(["--cookies", cookies_file])
-    elsif cookies_browser
-      cmd.concat(["--cookies-from-browser", cookies_browser])
-    end
+    cmd.concat(["--max-filesize", "#{YTDLP_MAX_FILESIZE_MB}M"]) if YTDLP_MAX_FILESIZE_BYTES
+    cmd.concat(cookie_args)
     cmd << post_url
 
-    stdout, stderr, status = Open3.capture3(*cmd)
-    unless status.success?
-      error_output = stderr.strip.empty? ? stdout.strip : stderr.strip
+    max_dir_bytes = YTDLP_MAX_FILESIZE_BYTES ? YTDLP_MAX_FILESIZE_BYTES * DOWNLOAD_DIR_LIMIT_MULTIPLIER : nil
+    result = run_command_with_limits(
+      *cmd,
+      timeout_seconds: YTDLP_DOWNLOAD_TIMEOUT_SECONDS,
+      watched_dir: tmp_dir,
+      max_dir_bytes: max_dir_bytes
+    )
+    if result.timed_out
+      FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+      raise MediaDownloadBlocked, "Скачивание заняло больше #{YTDLP_DOWNLOAD_TIMEOUT_SECONDS} сек., пропускаю."
+    end
+    if result.limit_exceeded
+      FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+      raise MediaDownloadBlocked, "Файл стал слишком большим во время загрузки, пропускаю."
+    end
+
+    unless result.status&.success?
+      error_output = command_error_output(result)
       puts "yt-dlp error (format #{format}): #{error_output}" unless error_output.empty?
       FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
       next
@@ -434,13 +693,13 @@ def download_video_with_ytdlp(post_url, tmp_prefix)
     end
 
     selected = candidates.find { |path| File.extname(path).downcase == ".mp4" } || candidates.first
-    adjusted = transcode_video_to_fit(selected, max_filesize_bytes)
+    adjusted = transcode_video_to_fit(selected, YTDLP_MAX_FILESIZE_BYTES)
     if adjusted
       return adjusted
     end
 
     FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
-    next
+    raise MediaDownloadBlocked, "Видео не удалось уложить в лимит #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
   end
 
   nil
@@ -459,7 +718,12 @@ def download_instagram_video(post_url)
 end
 
 def download_twitter_video(twitter_url)
-  download_video_with_ytdlp(twitter_url, "tw_video_")
+  normalized_url = normalize_twitter_url(twitter_url)
+  unless extract_tweet_id(normalized_url)
+    raise MediaDownloadBlocked, "Поддерживаю только ссылки на твиты. Twitter/X broadcast/live URL пропускаю."
+  end
+
+  download_video_with_ytdlp(normalized_url, "tw_video_")
 end
 
 def load_user_locations
@@ -485,7 +749,7 @@ def set_user_location(user_id, location)
   save_user_locations(locations)
 end
 
-# Определяем местоположение из текста сообщения
+# Detects a supported location from message text.
 def detect_location(text)
   text_lower = text.downcase
 
@@ -500,50 +764,50 @@ def detect_location(text)
   nil
 end
 
-# Функция для конвертации времени
+# Converts time between supported time zones.
 def convert_time(text, user_location = nil)
-  # Ищем указание конкретного времени (например: "время 21:00" или "время 21")
+  # Look for a specific time after the localized time keyword.
   time_match = text.match(/время\s+(\d{1,2})(?::(\d{2}))?/i)
 
-  # Получаем объекты всех трех часовых поясов
+  # Load all supported time zones.
   moscow_tz = TZInfo::Timezone.get('Europe/Moscow')
   kyiv_tz = TZInfo::Timezone.get('Europe/Kiev')
   brussels_tz = TZInfo::Timezone.get('Europe/Brussels')
 
-  # Начинаем с текущего UTC времени
+  # Start from the current UTC time.
   now_utc = Time.now.utc
 
-  # Если указано конкретное время и известно местоположение пользователя
+  # If a specific time and user location are known, interpret the time there.
   if time_match && user_location
     hours = time_match[1].to_i
     minutes = time_match[2] ? time_match[2].to_i : 0
 
-    # Определяем часовой пояс пользователя
+    # Resolve the user's time zone.
     user_tz = case user_location
               when 'Europe/Moscow' then moscow_tz
               when 'Europe/Kiev' then kyiv_tz
               when 'Europe/Brussels' then brussels_tz
               end
 
-    # Преобразуем текущее UTC в локальное в часовом поясе пользователя
+    # Convert current UTC time to the user's local time zone.
     local_now = user_tz.utc_to_local(now_utc)
 
-    # Создаем новое время с той же датой, но указанными часами/минутами
+    # Create a time on the same date with the requested hour/minute.
     local_time = Time.new(
       local_now.year, local_now.month, local_now.day,
       hours, minutes, 0, local_now.utc_offset
     )
 
-    # Преобразуем обратно в UTC
+    # Convert back to UTC.
     now_utc = local_time.getutc
   end
 
-  # Преобразуем UTC время во все три часовых пояса
+  # Convert UTC time to all supported time zones.
   moscow_time = moscow_tz.utc_to_local(now_utc)
   kyiv_time = kyiv_tz.utc_to_local(now_utc)
   brussels_time = brussels_tz.utc_to_local(now_utc)
 
-  # Форматируем ответ
+  # Format the response.
   response = "🕒 "
 
   if time_match && user_location
@@ -560,7 +824,7 @@ def convert_time(text, user_location = nil)
     response += "Текущее время:\n"
   end
 
-  # Добавляем информацию о часовых поясах и летнем времени
+  # Add time zone and daylight-saving information.
   moscow_dst = moscow_tz.dst?(moscow_time) ? " (летнее)" : ""
   kyiv_dst = kyiv_tz.dst?(kyiv_time) ? " (летнее)" : ""
   brussels_dst = brussels_tz.dst?(brussels_time) ? " (летнее)" : ""
@@ -569,7 +833,7 @@ def convert_time(text, user_location = nil)
   response += "🇺🇦 Киев#{kyiv_dst}: #{kyiv_time.strftime('%H:%M')}\n"
   response += "🇧🇪 Брюссель#{brussels_dst}: #{brussels_time.strftime('%H:%M')}"
 
-  # Добавляем даты, если они различаются
+  # Add dates when converted times fall on different dates.
   dates = []
   dates << "Москва: #{moscow_time.strftime('%d.%m.%Y')}" if moscow_time.to_date != kyiv_time.to_date || moscow_time.to_date != brussels_time.to_date
   dates << "Киев: #{kyiv_time.strftime('%d.%m.%Y')}" if kyiv_time.to_date != moscow_time.to_date || kyiv_time.to_date != brussels_time.to_date
@@ -582,16 +846,133 @@ def convert_time(text, user_location = nil)
   response
 end
 
+def clean_media_link(link)
+  link.to_s.sub(/[)\].,!?]+\z/, "")
+end
+
+def extract_media_links(text, regex)
+  text.scan(regex).flatten.map { |link| clean_media_link(link) }.uniq
+end
+
+def limit_media_links(bot, chat_id, links)
+  return links if links.size <= MAX_MEDIA_LINKS_PER_MESSAGE
+
+  safe_send_message(
+    bot,
+    chat_id,
+    "В одном сообщении обрабатываю первые #{MAX_MEDIA_LINKS_PER_MESSAGE} медиа-ссылки."
+  )
+  links.first(MAX_MEDIA_LINKS_PER_MESSAGE)
+end
+
+def cleanup_media_path(path)
+  return unless path
+
+  dir = File.dirname(path)
+  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|tw_shot_)/)
+    FileUtils.remove_entry(dir)
+  elsif File.exist?(path)
+    File.delete(path)
+  end
+rescue => e
+  puts "Ошибка удаления временного файла: #{e.class}: #{e.message}"
+end
+
+def send_video_file(bot, chat_id, video_path, caption, source_name)
+  return unless video_path && File.exist?(video_path)
+
+  bot.api.send_video(
+    chat_id: chat_id,
+    video: Faraday::UploadIO.new(video_path, "video/mp4"),
+    caption: caption
+  )
+rescue => e
+  puts "Ошибка отправки в Telegram (#{source_name}): #{e.class}: #{e.message}"
+  safe_send_message(bot, chat_id, "Ошибка при отправке видео: #{e.message}")
+ensure
+  cleanup_media_path(video_path)
+end
+
+def send_photo_file(bot, chat_id, photo_path, caption, source_name)
+  return unless photo_path && File.exist?(photo_path)
+
+  bot.api.send_photo(
+    chat_id: chat_id,
+    photo: Faraday::UploadIO.new(photo_path, "image/png"),
+    caption: caption
+  )
+rescue => e
+  puts "Ошибка отправки в Telegram (#{source_name}): #{e.class}: #{e.message}"
+ensure
+  cleanup_media_path(photo_path)
+end
+
+def process_media_job(bot, job)
+  chat_id = job[:chat_id]
+  link = job[:link]
+
+  case job[:type]
+  when :twitter_photo
+    screenshot_path = download_twitter_screenshot(link)
+    send_photo_file(bot, chat_id, screenshot_path, "Фото из Twitter", "Twitter фото")
+  when :twitter_video
+    video_path = download_twitter_video(link)
+    send_video_file(bot, chat_id, video_path, "Видео из Twitter", "Twitter")
+  when :instagram_video
+    video_path = download_instagram_video(link)
+    send_video_file(bot, chat_id, video_path, "Видео из Instagram", "Instagram")
+  else
+    puts "Unknown media job type: #{job[:type]}"
+  end
+rescue MediaDownloadBlocked => e
+  puts "media blocked (#{job[:type]}): #{e.message}"
+  safe_send_message(bot, chat_id, e.message)
+rescue => e
+  puts "media job error (#{job[:type]}): #{e.class}: #{e.message}"
+end
+
+def start_media_workers(bot, media_queue)
+  MEDIA_WORKER_COUNT.times.map do |index|
+    Thread.new do
+      loop do
+        begin
+          job = media_queue.pop
+          process_media_job(bot, job)
+        rescue => e
+          puts "media worker #{index + 1} error: #{e.class}: #{e.message}"
+        end
+      end
+    end
+  end
+end
+
+def enqueue_media_job(media_queue, bot, chat_id, job)
+  media_queue.push(job, true)
+  true
+rescue ThreadError
+  safe_send_message(bot, chat_id, "Очередь обработки медиа заполнена. Попробуйте позже.")
+  false
+end
+
 # ---------------------------------------------------------------------------
-# Запуск бота
+# Bot startup
 # ---------------------------------------------------------------------------
 Telegram::Bot::Client.run(TOKEN) do |bot|
-  puts "Бот запущен..."
+  puts "Bot started..."
 
-  # Получаем информацию о боте, чтобы знать его username
+  # Fetch bot info to know its username.
   bot_info = bot.api.get_me
   bot_username = "VideoMorph_bot" rescue nil
-  puts "Бот запущен с именем: @#{bot_username}" if bot_username
+  puts "Bot username: @#{bot_username}" if bot_username
+
+  if DROP_PENDING_UPDATES_ON_START
+    begin
+      bot.api.delete_webhook(drop_pending_updates: true)
+      puts "Dropped pending Telegram updates on startup."
+    rescue => e
+      puts "Could not drop pending Telegram updates: #{e.class}: #{e.message}"
+    end
+  end
 
   reminder_thread = Thread.new do
     loop do
@@ -605,19 +986,22 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
     end
   end
 
-
+  media_queue = SizedQueue.new(MEDIA_QUEUE_SIZE)
+  start_media_workers(bot, media_queue)
+  puts "Media workers: #{MEDIA_WORKER_COUNT}, queue size: #{MEDIA_QUEUE_SIZE}"
 
   bot.listen do |message|
-    next unless message.is_a?(Telegram::Bot::Types::Message)
+    begin
+      next unless message.is_a?(Telegram::Bot::Types::Message)
 
     text = message.text || message.caption || ""
     chat_id = message.chat.id
     user_id = message.from&.id.to_s if message.from
 
-    # Проверяем, обращаются ли к боту
+    # Check whether the message addresses this bot.
     is_bot_mentioned = bot_username && text.include?("@#{bot_username}")
 
-    # Новый блок: Обработка команды напоминания
+    # Handle reminder commands.
     if is_bot_mentioned
       # Remove the bot mention from the text for easier parsing
       command_text = text.gsub("@#{bot_username}", "").strip
@@ -654,7 +1038,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       end
     end
 
-    # --- 1) Обработка указания местоположения ---
+    # --- 1) Location updates ---
     if is_bot_mentioned && text.downcase.include?("я нахожусь в")
       location = detect_location(text)
       if location && user_id
@@ -674,7 +1058,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       end
     end
 
-    # --- 2) Обработка запроса времени ---
+    # --- 2) Time conversion requests ---
     is_time_request = is_bot_mentioned &&
       (text.downcase.match?(/время(\s+\d{1,2}(?::\d{2})?)?/) ||
         text.start_with?("/time") ||
@@ -698,7 +1082,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       next
     end
 
-    # --- 3) Проверка текущего местоположения ---
+    # --- 3) Current location checks ---
     if is_bot_mentioned && (
       text.downcase.include?("где я") ||
         text.downcase.include?("мое местоположение") ||
@@ -725,75 +1109,30 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       next
     end
 
-    # --- 4) Фото команды для Twitter ---
+    # --- 4) Twitter photo commands ---
     if is_bot_mentioned && text.downcase.include?("фото")
-      twitter_links = text.scan(TWITTER_REGEX).flatten
+      twitter_links = limit_media_links(bot, chat_id, extract_media_links(text, TWITTER_REGEX))
       if twitter_links.any?
         twitter_links.each do |link|
-          screenshot_path = download_twitter_screenshot(link)
-          if screenshot_path && File.exist?(screenshot_path)
-            begin
-              bot.api.send_photo(
-                chat_id: chat_id,
-                photo: Faraday::UploadIO.new(screenshot_path, "image/png"),
-                caption: "Фото из Twitter"
-              )
-            rescue => e
-              puts "Ошибка отправки в Telegram (Twitter фото): #{e.message}"
-            ensure
-              File.delete(screenshot_path) if File.exist?(screenshot_path)
-              Dir.rmdir(File.dirname(screenshot_path)) rescue nil
-            end
-          end
+          enqueue_media_job(media_queue, bot, chat_id, { type: :twitter_photo, chat_id: chat_id, link: link })
         end
         next
       end
     end
 
-    # --- 1) Twitter / X ссылки ---
-    twitter_links = text.scan(TWITTER_REGEX).flatten
+    # --- 1) Twitter / X links ---
+    twitter_links = limit_media_links(bot, chat_id, extract_media_links(text, TWITTER_REGEX))
     twitter_links.each do |link|
-      video_path = download_twitter_video(link)
-      if video_path && File.exist?(video_path)
-        begin
-          bot.api.send_video(
-            chat_id: chat_id,
-            video: Faraday::UploadIO.new(video_path, "video/mp4"),
-            caption: "Видео из Twitter"
-          )
-        rescue => e
-          puts "Ошибка отправки в Telegram (Twitter): #{e.message}"
-        ensure
-          # Удаляем временные файлы
-          File.delete(video_path) if File.exist?(video_path)
-          Dir.rmdir(File.dirname(video_path)) rescue nil
-        end
-      end
+      enqueue_media_job(media_queue, bot, chat_id, { type: :twitter_video, chat_id: chat_id, link: link })
     end
 
-    # --- 2) Instagram ссылки ---
-    instagram_links = text.scan(INSTAGRAM_REGEX).flatten
+    # --- 2) Instagram links ---
+    instagram_links = limit_media_links(bot, chat_id, extract_media_links(text, INSTAGRAM_REGEX))
     instagram_links.each do |link|
-      # Пытаемся скачать видео
-      video_path = download_instagram_video(link)
-
-      if video_path && File.exist?(video_path)
-        # Успешно скачано — отправляем
-        begin
-          bot.api.send_video(
-            chat_id: chat_id,
-            video: Faraday::UploadIO.new(video_path, "video/mp4"),
-            caption: "Видео из Instagram"
-          )
-        rescue => e
-          bot.api.send_message(chat_id: chat_id, text: "Ошибка при отправке видео: #{e.message}")
-        ensure
-          # Удаляем временные файлы
-          File.delete(video_path) if File.exist?(video_path)
-          Dir.rmdir(File.dirname(video_path)) rescue nil
-        end
-
-      end
+      enqueue_media_job(media_queue, bot, chat_id, { type: :instagram_video, chat_id: chat_id, link: link })
+    end
+    rescue => e
+      puts "Unhandled message error: #{e.class}: #{e.message}"
     end
   end
 end
