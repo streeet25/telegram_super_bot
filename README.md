@@ -9,6 +9,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 - Downloads Twitter/X videos with `yt-dlp`.
 - Downloads Instagram videos with `yt-dlp`.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
+- Resolves Spotify track links to a concrete YouTube video link through official APIs.
 - Converts time between Moscow, Kyiv, and Brussels.
 - Stores per-user location preferences.
 - Creates reminders from chat commands.
@@ -20,6 +21,8 @@ The bot currently understands Russian user commands and replies. Code comments a
 - `yt-dlp` available in `PATH`.
 - `ffmpeg` available in `PATH` for video compression.
 - Python 3 and Playwright for tweet screenshots.
+- Spotify application credentials for Spotify-to-YouTube lookup.
+- YouTube Data API key for concrete YouTube video lookup.
 - A Telegram bot token from BotFather.
 
 ## Setup
@@ -63,14 +66,21 @@ Use commands by mentioning the bot in a Telegram chat.
 - `@bot_username где я`
 - `@bot_username напомни время 21:00 по Киеву текст напоминания`
 - `@bot_username фото https://x.com/.../status/...`
+- `https://open.spotify.com/track/...`
 
-Plain Twitter/X and Instagram post links are processed as media links.
+Plain Twitter/X and Instagram post links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Required | Telegram bot token. Never commit it. |
+| `SPOTIFY_CLIENT_ID` | Empty | Spotify application client ID for track metadata lookup. |
+| `SPOTIFY_CLIENT_SECRET` | Empty | Spotify application client secret. Never commit it. |
+| `SPOTIFY_MARKET` | Empty | Optional Spotify market code, for example `US` or `BE`. |
+| `YOUTUBE_API_KEY` | Empty | YouTube Data API key for direct video search. |
+| `YOUTUBE_REGION_CODE` | Empty | Optional YouTube search region code, for example `US` or `BE`. |
+| `YOUTUBE_SEARCH_RESULTS` | `5` | Number of YouTube candidates to score, capped at `10`. |
 | `MAX_MEDIA_LINKS_PER_MESSAGE` | `2` | Maximum media links processed from a single message. |
 | `MEDIA_QUEUE_SIZE` | `4` | Maximum queued media jobs. |
 | `MEDIA_WORKER_COUNT` | `1` | Number of media worker threads, capped at `4`. |
@@ -81,6 +91,7 @@ Plain Twitter/X and Instagram post links are processed as media links.
 | `YTDLP_SOCKET_TIMEOUT_SECONDS` | `15` | Network socket timeout passed to `yt-dlp`. |
 | `FFMPEG_TIMEOUT_SECONDS` | `120` | Timeout for compression attempts. |
 | `SCREENSHOT_TIMEOUT_SECONDS` | `30` | Timeout for tweet screenshot generation. |
+| `API_HTTP_TIMEOUT_SECONDS` | `10` | Timeout for Spotify and YouTube HTTP API calls. |
 | `YTDLP_FORMAT` | Built-in format | Optional custom `yt-dlp` format selector. |
 | `YTDLP_COOKIES_FILE` | Empty | Optional cookies file path for `yt-dlp`. |
 | `YTDLP_COOKIES_FROM_BROWSER` | Empty | Optional browser name for `yt-dlp --cookies-from-browser`. |
