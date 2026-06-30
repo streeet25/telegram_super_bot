@@ -57,10 +57,15 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       is_bot_mentioned = bot_username && text.include?("@#{bot_username}")
       is_bot_addressed = private_chat || is_bot_mentioned
       command_text = is_bot_mentioned ? text.gsub("@#{bot_username}", "").strip : text.strip
+      if onboarding_command?(text)
+        command = text.strip.split(/\s+/, 2).first
+        puts "Onboarding command received: command=#{command.inspect} chat_id=#{chat_id} " \
+          "chat_type=#{message.chat.type.inspect} user_id=#{user_id.inspect}"
+      end
 
       if bot_command?(text, %w[start], bot_username: bot_username, private_chat: true)
         if private_chat
-          send_language_selection(bot, chat_id)
+          send_language_selection(bot, chat_id, bot_username)
         else
           bot.api.send_message(
             chat_id: chat_id,
@@ -72,7 +77,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
 
       if bot_command?(text, %w[help помощь], bot_username: bot_username, private_chat: true)
         language = user_id ? get_user_language(user_id) : DEFAULT_ONBOARDING_LANGUAGE
-        bot.api.send_message(chat_id: chat_id, text: onboarding_instructions(language, bot_username))
+        send_onboarding_instructions(bot, chat_id, language, bot_username)
         next
       end
 

@@ -45,6 +45,10 @@ def bot_command?(text, command_names, bot_username:, private_chat:)
   text.to_s.strip.match?(pattern)
 end
 
+def onboarding_command?(text)
+  text.to_s.strip.match?(%r{\A/(?:start|help|помощь)(?:@\w+)?(?:\s|$)}i)
+end
+
 def language_selection_markup
   keyboard = [[
     Telegram::Bot::Types::InlineKeyboardButton.new(text: 'RU', callback_data: "#{LANGUAGE_CALLBACK_PREFIX}ru"),
@@ -54,11 +58,23 @@ def language_selection_markup
   Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: keyboard)
 end
 
-def send_language_selection(bot, chat_id)
+def send_language_selection(bot, chat_id, bot_username = nil)
+  puts "Sending onboarding language selection: chat_id=#{chat_id}"
   bot.api.send_message(
     chat_id: chat_id,
     text: "Выберите язык / Choose a language:",
     reply_markup: language_selection_markup
+  )
+rescue => e
+  puts "Onboarding language selection failed: #{e.class}: #{e.message}"
+  send_onboarding_instructions(bot, chat_id, DEFAULT_ONBOARDING_LANGUAGE, bot_username)
+end
+
+def send_onboarding_instructions(bot, chat_id, language, bot_username)
+  puts "Sending onboarding instructions: chat_id=#{chat_id} language=#{language}"
+  bot.api.send_message(
+    chat_id: chat_id,
+    text: onboarding_instructions(language, bot_username)
   )
 end
 
@@ -73,10 +89,7 @@ def handle_language_callback(bot, callback, bot_username)
   )
 
   chat_id = callback.message&.chat&.id || callback.from&.id
-  bot.api.send_message(
-    chat_id: chat_id,
-    text: onboarding_instructions(language, bot_username)
-  )
+  send_onboarding_instructions(bot, chat_id, language, bot_username)
   true
 end
 
