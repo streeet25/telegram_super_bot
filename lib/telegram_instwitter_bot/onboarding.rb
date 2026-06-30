@@ -101,43 +101,87 @@ def onboarding_instructions(language, bot_username)
     <<~TEXT
       Language: English
 
-      How to use the bot:
+      How to use it:
       In private chat, send Twitter/X, Instagram, or Spotify links directly.
       In group chats, mention the bot before commands: #{bot_mention}
+      Group example: #{bot_mention} time 21:00
 
-      Private chat commands:
-      I am in Belgium
-      time
-      time 21:00
-      where am I
-      remind me at 21:00 in Kyiv reminder text
-      photo https://x.com/.../status/...
-      https://open.spotify.com/track/...
+      Commands:
 
-      Notes:
-      Twitter/X and Instagram links are downloaded as media.
-      Spotify track links are converted to a YouTube link.
+      Command: I am in Belgium
+      What it does: saves your location for time conversion and reminders.
+      Example: I am in Kyiv
+
+      Command: time
+      What it does: shows current time in Moscow, Kyiv, and Brussels.
+      Example: time
+
+      Command: time 21:00
+      What it does: converts 21:00 from your saved location to the other cities.
+      Example: time 21:00
+
+      Command: where am I
+      What it does: shows the location saved for you.
+      Example: where am I
+
+      Command: remind me at 21:00 in Kyiv text
+      What it does: creates a reminder. If today's time has passed, it schedules tomorrow.
+      Example: remind me at 21:00 in Kyiv call Alex
+
+      Command: photo https://x.com/.../status/...
+      What it does: sends a tweet screenshot/photo.
+      Example: photo https://x.com/user/status/123
+
+      Command: Twitter/X or Instagram link
+      What it does: downloads and sends media from the post.
+      Example: https://www.instagram.com/reel/...
+
+      Command: Spotify track link
+      What it does: finds a matching YouTube link.
+      Example: https://open.spotify.com/track/...
     TEXT
   else
     <<~TEXT
       Язык: русский
 
-      Как пользоваться ботом:
+      Как пользоваться:
       В личке можно просто отправить ссылку на Twitter/X, Instagram или Spotify.
       В групповых чатах перед командами упоминайте бота: #{bot_mention}
+      Пример для группы: #{bot_mention} время 21:00
 
-      Команды в личке:
-      я нахожусь в Бельгии
-      время
-      время 21:00
-      где я
-      напомни время 21:00 по Киеву текст напоминания
-      фото https://x.com/.../status/...
-      https://open.spotify.com/track/...
+      Команды:
 
-      Примечания:
-      Twitter/X и Instagram-ссылки бот скачивает как медиа.
-      Spotify-ссылки бот превращает в YouTube-ссылку.
+      Команда: я нахожусь в Бельгии
+      Что делает: сохраняет ваше местоположение для конвертации времени и напоминаний.
+      Пример: я нахожусь в Киеве
+
+      Команда: время
+      Что делает: показывает текущее время в Москве, Киеве и Брюсселе.
+      Пример: время
+
+      Команда: время 21:00
+      Что делает: переводит 21:00 из вашего сохраненного местоположения в остальные города.
+      Пример: время 21:00
+
+      Команда: где я
+      Что делает: показывает сохраненное для вас местоположение.
+      Пример: где я
+
+      Команда: напомни время 21:00 по Киеву текст
+      Что делает: создает напоминание. Если время сегодня уже прошло, ставит на завтра.
+      Пример: напомни время 21:00 по Киеву созвон с Алексом
+
+      Команда: фото https://x.com/.../status/...
+      Что делает: отправляет скриншот/фото твита.
+      Пример: фото https://x.com/user/status/123
+
+      Команда: ссылка Twitter/X или Instagram
+      Что делает: скачивает и отправляет медиа из поста.
+      Пример: https://www.instagram.com/reel/...
+
+      Команда: ссылка на Spotify-трек
+      Что делает: находит подходящую YouTube-ссылку.
+      Пример: https://open.spotify.com/track/...
     TEXT
   end
 end

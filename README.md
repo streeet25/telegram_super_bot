@@ -74,18 +74,16 @@ In private chat, send `/start` to choose Russian or English and receive usage in
 
 Use commands by mentioning the bot in a Telegram group chat. In private chat, the mention is optional.
 
-- `@bot_username я нахожусь в Бельгии`
-- `@bot_username время`
-- `@bot_username время 21:00`
-- `@bot_username где я`
-- `@bot_username напомни время 21:00 по Киеву текст напоминания`
-- `@bot_username фото https://x.com/.../status/...`
-- `@bot_username I am in Belgium`
-- `@bot_username time 21:00`
-- `@bot_username where am I`
-- `@bot_username remind me at 21:00 in Kyiv reminder text`
-- `@bot_username photo https://x.com/.../status/...`
-- `https://open.spotify.com/track/...`
+| Command | What it does | Example |
+| --- | --- | --- |
+| `я нахожусь в Бельгии` / `I am in Belgium` | Saves your location for time conversion and reminders. | `@bot_username I am in Kyiv` |
+| `время` / `time` | Shows current time in Moscow, Kyiv, and Brussels. | `@bot_username time` |
+| `время 21:00` / `time 21:00` | Converts that time from your saved location to the other cities. | `@bot_username time 21:00` |
+| `где я` / `where am I` | Shows your saved location. | `@bot_username where am I` |
+| `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
+| `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
+| Twitter/X or Instagram link | Downloads and sends media from the post. | `https://www.instagram.com/reel/...` |
+| Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
 Plain Twitter/X and Instagram post links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
 
