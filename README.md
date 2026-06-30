@@ -56,6 +56,16 @@ ruby bot.rb
 
 The bot stores runtime state in `user_locations.json` and `reminders.json`. These files are ignored by Git because they contain chat/user state.
 
+## Project Layout
+
+- `bot.rb` starts the Telegram polling loop and routes incoming messages.
+- `lib/telegram_instwitter_bot/config.rb` contains requires, constants, and environment-backed settings.
+- `lib/telegram_instwitter_bot/reminders.rb` handles reminder parsing, storage, and delivery.
+- `lib/telegram_instwitter_bot/time_locations.rb` handles user locations and time conversion.
+- `lib/telegram_instwitter_bot/media_jobs.rb` owns queue workers and Telegram media sending.
+- `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, and `instagram.rb` handle media lookup/download helpers.
+- `lib/telegram_instwitter_bot/spotify_youtube.rb` resolves Spotify tracks to YouTube video links.
+
 ## Commands
 
 Use commands by mentioning the bot in a Telegram chat.

@@ -47,11 +47,18 @@ GEM
     multipart-post (2.4.1)
     net-http (0.6.0)
       uri
+    nokogiri (1.19.4-x86_64-darwin)
+      racc (~> 1.4)
+    racc (1.8.1)
     telegram-bot-ruby (2.2.0)
       dry-struct (~> 1.6)
       faraday (~> 2.0)
       faraday-multipart (~> 1.0)
       zeitwerk (~> 2.6)
+    tzinfo (2.0.6)
+      concurrent-ruby (~> 1.0)
+    tzinfo-data (1.2026.2)
+      tzinfo (>= 1.0.0)
     uri (1.0.2)
     zeitwerk (2.7.1)
 
@@ -59,8 +66,12 @@ PLATFORMS
   x86_64-darwin-21
 
 DEPENDENCIES
+  faraday
   httparty
+  nokogiri
   telegram-bot-ruby
+  tzinfo
+  tzinfo-data
 
 BUNDLED WITH
    2.4.13
