@@ -58,7 +58,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       is_bot_addressed = private_chat || is_bot_mentioned
       command_text = is_bot_mentioned ? text.gsub("@#{bot_username}", "").strip : text.strip
 
-      if bot_command?(text, %w[start], bot_username: bot_username, private_chat: private_chat)
+      if bot_command?(text, %w[start], bot_username: bot_username, private_chat: true)
         if private_chat
           send_language_selection(bot, chat_id)
         else
@@ -70,7 +70,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         next
       end
 
-      if bot_command?(text, %w[help помощь], bot_username: bot_username, private_chat: private_chat)
+      if bot_command?(text, %w[help помощь], bot_username: bot_username, private_chat: true)
         language = user_id ? get_user_language(user_id) : DEFAULT_ONBOARDING_LANGUAGE
         bot.api.send_message(chat_id: chat_id, text: onboarding_instructions(language, bot_username))
         next
