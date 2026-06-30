@@ -80,6 +80,11 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 - `@bot_username где я`
 - `@bot_username напомни время 21:00 по Киеву текст напоминания`
 - `@bot_username фото https://x.com/.../status/...`
+- `@bot_username I am in Belgium`
+- `@bot_username time 21:00`
+- `@bot_username where am I`
+- `@bot_username remind me at 21:00 in Kyiv reminder text`
+- `@bot_username photo https://x.com/.../status/...`
 - `https://open.spotify.com/track/...`
 
 Plain Twitter/X and Instagram post links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.

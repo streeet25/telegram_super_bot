@@ -14,6 +14,13 @@ end
 
 def parse_reminder_command(text)
   match = text.match(REMINDER_REGEX)
+  language = 'ru'
+
+  unless match
+    match = text.match(ENGLISH_REMINDER_REGEX)
+    language = 'en' if match
+  end
+
   return nil unless match
 
   hours = match[1].to_i
@@ -25,19 +32,24 @@ def parse_reminder_command(text)
     hours: hours,
     minutes: minutes,
     location: normalize_location(location),
-    message: message
+    message: message,
+    language: language
   }
+end
+
+def reminder_command_text?(text)
+  text.to_s.match?(/^(?:задрочи|оповести|напомни|\/?remind(?:\s+me)?)\b/i)
 end
 
 def normalize_location(location_text)
   return nil unless location_text
 
   location_text = location_text.downcase
-  if location_text.match?(/москв|мск/i)
+  if location_text.match?(/москв|мск|moscow|msk/i)
     'Europe/Moscow'
-  elsif location_text.match?(/киев|київ/i)
+  elsif location_text.match?(/киев|київ|kyiv|kiev/i)
     'Europe/Kiev'
-  elsif location_text.match?(/бельги|брюссел/i)
+  elsif location_text.match?(/бельги|брюссел|belgium|brussels/i)
     'Europe/Brussels'
   else
     nil
@@ -75,6 +87,7 @@ def add_reminder(chat_id, user_id, reminder_info, user_location)
     'time' => utc_time,
     'message' => reminder_info[:message],
     'timezone' => timezone,
+    'language' => reminder_info[:language] || 'ru',
     'created_at' => Time.now.utc.iso8601
   }
 
@@ -106,7 +119,7 @@ def check_due_reminders(bot)
       # Send the reminder message
       bot.api.send_message(
         chat_id: reminder['chat_id'],
-        text: "⏰ НАПОМИНАНИЕ: #{reminder['message']}"
+        text: reminder['language'] == 'en' ? "⏰ REMINDER: #{reminder['message']}" : "⏰ НАПОМИНАНИЕ: #{reminder['message']}"
       )
       puts "Sent reminder: #{reminder['id']} to chat #{reminder['chat_id']}"
     rescue => e
@@ -124,22 +137,29 @@ def check_due_reminders(bot)
 end
 
 # Format a time string based on timezone
-def format_reminder_time(time_str, timezone)
+def format_reminder_time(time_str, timezone, language = 'ru')
   time = Time.parse(time_str)
   tz = TZInfo::Timezone.get(timezone)
   local_time = tz.utc_to_local(time.utc)
 
   # Get timezone abbreviation/name
-  timezone_name = case timezone
-                  when 'Europe/Moscow'
-                    'Москве'
-                  when 'Europe/Kiev'
-                    'Киеву'
-                  when 'Europe/Brussels'
-                    'Брюсселю'
+  timezone_name = if language == 'en'
+                    case timezone
+                    when 'Europe/Moscow' then 'Moscow'
+                    when 'Europe/Kiev' then 'Kyiv'
+                    when 'Europe/Brussels' then 'Brussels'
+                    else
+                      timezone
+                    end
                   else
-                    timezone
+                    case timezone
+                    when 'Europe/Moscow' then 'Москве'
+                    when 'Europe/Kiev' then 'Киеву'
+                    when 'Europe/Brussels' then 'Брюсселю'
+                    else
+                      timezone
+                    end
                   end
 
-  "#{local_time.strftime('%H:%M')} по #{timezone_name}"
+  language == 'en' ? "#{local_time.strftime('%H:%M')} in #{timezone_name}" : "#{local_time.strftime('%H:%M')} по #{timezone_name}"
 end

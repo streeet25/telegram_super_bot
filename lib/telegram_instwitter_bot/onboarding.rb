@@ -106,18 +106,17 @@ def onboarding_instructions(language, bot_username)
       In group chats, mention the bot before commands: #{bot_mention}
 
       Private chat commands:
-      я нахожусь в Бельгии
-      время
-      время 21:00
-      где я
-      напомни время 21:00 по Киеву reminder text
-      фото https://x.com/.../status/...
+      I am in Belgium
+      time
+      time 21:00
+      where am I
+      remind me at 21:00 in Kyiv reminder text
+      photo https://x.com/.../status/...
       https://open.spotify.com/track/...
 
       Notes:
       Twitter/X and Instagram links are downloaded as media.
       Spotify track links are converted to a YouTube link.
-      Time and reminder commands currently use Russian wording.
     TEXT
   else
     <<~TEXT

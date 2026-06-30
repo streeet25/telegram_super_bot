@@ -51,6 +51,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       text = message.text || message.caption || ""
       chat_id = message.chat.id
       user_id = message.from&.id.to_s if message.from
+      user_language = user_id ? get_user_language(user_id) : DEFAULT_ONBOARDING_LANGUAGE
       private_chat = private_chat?(message)
 
       # Check whether the message addresses this bot.
@@ -76,16 +77,16 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       end
 
       if bot_command?(text, %w[help помощь], bot_username: bot_username, private_chat: true)
-        language = user_id ? get_user_language(user_id) : DEFAULT_ONBOARDING_LANGUAGE
-        send_onboarding_instructions(bot, chat_id, language, bot_username)
+        send_onboarding_instructions(bot, chat_id, user_language, bot_username)
         next
       end
 
       # Handle reminder commands.
       if is_bot_addressed
         # Check if it's a reminder command
-        if command_text.match?(/^(?:задрочи|оповести|напомни)\b/i)
+        if reminder_command_text?(command_text)
           reminder_info = parse_reminder_command(command_text)
+          reminder_info[:language] ||= user_language if reminder_info
 
           if reminder_info
             # Get user's location if no specific location in the command
@@ -95,61 +96,61 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
             reminder = add_reminder(chat_id, user_id, reminder_info, user_location)
 
             # Format response
-            time_str = format_reminder_time(reminder['time'], reminder['timezone'])
+            time_str = format_reminder_time(reminder['time'], reminder['timezone'], reminder['language'])
 
-            bot.api.send_message(
-              chat_id: chat_id,
-              text: "✅ Напоминание установлено на #{time_str}.\nСообщение: #{reminder['message']}"
-            )
+            reminder_response = if reminder['language'] == 'en'
+                                  "✅ Reminder set for #{time_str}.\nMessage: #{reminder['message']}"
+                                else
+                                  "✅ Напоминание установлено на #{time_str}.\nСообщение: #{reminder['message']}"
+                                end
+
+            bot.api.send_message(chat_id: chat_id, text: reminder_response)
             next
           else
             # If the command format is incorrect, provide help
-            if command_text.match?(/^(?:задрочи|оповести|напомни)\b/i)
-              bot.api.send_message(
-                chat_id: chat_id,
-                text: "❌ Неверный формат команды.\nПример: @#{bot_username} напомни время 21:00 по Киеву ЭТО НАПОМИНАНИЕ"
-              )
-              next
-            end
+            example = user_language == 'en' ? "@#{bot_username} remind me at 21:00 in Kyiv reminder text" : "@#{bot_username} напомни время 21:00 по Киеву ЭТО НАПОМИНАНИЕ"
+            error_text = user_language == 'en' ? "❌ Invalid command format.\nExample: #{example}" : "❌ Неверный формат команды.\nПример: #{example}"
+            bot.api.send_message(chat_id: chat_id, text: error_text)
+            next
           end
         end
       end
 
       # --- 1) Location updates ---
-      if is_bot_addressed && command_text.downcase.include?("я нахожусь в")
+      if is_bot_addressed && location_update_request?(command_text)
         location = detect_location(command_text)
         if location && user_id
           set_user_location(user_id, location)
 
-          location_name = case location
-                          when 'Europe/Moscow' then "Москве"
-                          when 'Europe/Kiev' then "Киеве"
-                          when 'Europe/Brussels' then "Бельгии"
-                          end
+          saved_location_name = location_name(location, user_language)
+          response = if user_language == 'en'
+                       "✅ Saved your location as #{saved_location_name}."
+                     else
+                       "✅ Запомнил, что вы находитесь в #{saved_location_name}."
+                     end
 
-          bot.api.send_message(
-            chat_id: chat_id,
-            text: "✅ Запомнил, что вы находитесь в #{location_name}."
-          )
+          bot.api.send_message(chat_id: chat_id, text: response)
           next
         end
       end
 
       # --- 2) Time conversion requests ---
-      is_time_request = is_bot_addressed &&
-        (command_text.downcase.match?(/время(\s+\d{1,2}(?::\d{2})?)?/) ||
-          command_text.start_with?("/time") ||
-          command_text.start_with?("/время"))
+      is_time_request = is_bot_addressed && time_request?(command_text)
 
       if is_time_request && user_id
         user_location = get_user_location(user_id)
 
         if user_location
-          response = convert_time(command_text, user_location)
+          response = convert_time(command_text, user_location, user_language)
         else
-          response = convert_time(command_text) +
-            "\n\n❗ Чтобы конвертировать конкретное время, сначала сообщите где вы находитесь." +
-            "\nНапример: \"@#{bot_username} я нахожусь в Бельгии\""
+          response = convert_time(command_text, nil, user_language)
+          response += if user_language == 'en'
+                        "\n\n❗ To convert a specific time, first tell me where you are." \
+                          "\nExample: \"@#{bot_username} I am in Belgium\""
+                      else
+                        "\n\n❗ Чтобы конвертировать конкретное время, сначала сообщите где вы находитесь." \
+                          "\nНапример: \"@#{bot_username} я нахожусь в Бельгии\""
+                      end
         end
 
         bot.api.send_message(
@@ -160,34 +161,28 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       end
 
       # --- 3) Current location checks ---
-      if is_bot_addressed && (
-        command_text.downcase.include?("где я") ||
-          command_text.downcase.include?("мое местоположение") ||
-          command_text.start_with?("/mylocation"))
+      if is_bot_addressed && current_location_request?(command_text)
 
         if user_id && (location = get_user_location(user_id))
-          location_name = case location
-                          when 'Europe/Moscow' then "Москве"
-                          when 'Europe/Kiev' then "Киеве"
-                          when 'Europe/Brussels' then "Бельгии"
-                          end
+          saved_location_name = location_name(location, user_language)
+          response = user_language == 'en' ? "📍 You are in #{saved_location_name}" : "📍 Вы находитесь в #{saved_location_name}"
 
-          bot.api.send_message(
-            chat_id: chat_id,
-            text: "📍 Вы находитесь в #{location_name}"
-          )
+          bot.api.send_message(chat_id: chat_id, text: response)
         else
-          bot.api.send_message(
-            chat_id: chat_id,
-            text: "❌ Я не знаю, где вы находитесь. Укажите ваше местоположение командой:" +
-              "\n\"@#{bot_username} я нахожусь в [Москве/Киеве/Бельгии]\""
-          )
+          response = if user_language == 'en'
+                       "❌ I do not know where you are. Set your location with:" \
+                         "\n\"@#{bot_username} I am in [Moscow/Kyiv/Belgium]\""
+                     else
+                       "❌ Я не знаю, где вы находитесь. Укажите ваше местоположение командой:" \
+                         "\n\"@#{bot_username} я нахожусь в [Москве/Киеве/Бельгии]\""
+                     end
+          bot.api.send_message(chat_id: chat_id, text: response)
         end
         next
       end
 
       # --- 4) Twitter photo commands ---
-      if is_bot_addressed && command_text.downcase.include?("фото")
+      if is_bot_addressed && twitter_photo_request?(command_text)
         twitter_links = limit_media_links(bot, chat_id, extract_media_links(command_text, TWITTER_REGEX))
         if twitter_links.any?
           twitter_links.each do |link|

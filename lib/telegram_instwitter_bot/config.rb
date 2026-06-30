@@ -58,6 +58,7 @@ REMINDERS_FILE = 'reminders.json'
 
 # Reminder command format detection regex
 REMINDER_REGEX = /^(?:задрочи|оповести|напомни)\s+время\s+(\d{1,2})(?::(\d{2}))?\s*(?:по\s+(.+?))?\s+(.+)$/i
+ENGLISH_REMINDER_REGEX = %r{^/?remind(?:\s+me)?(?:\s+(?:at|time))?\s+(\d{1,2})(?::(\d{2}))?\s*(?:(?:in|for)\s+(.+?))?\s+(.+)$}i
 
 MAX_MEDIA_LINKS_PER_MESSAGE = [(ENV["MAX_MEDIA_LINKS_PER_MESSAGE"] || "2").to_i, 1].max
 MEDIA_QUEUE_SIZE = [(ENV["MEDIA_QUEUE_SIZE"] || "4").to_i, 1].max
