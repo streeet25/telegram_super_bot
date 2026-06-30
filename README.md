@@ -12,6 +12,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 - Resolves Spotify track links to a concrete YouTube video link through official APIs.
 - Converts time between Moscow, Kyiv, and Brussels.
 - Stores per-user location preferences.
+- Stores per-user onboarding language preferences.
 - Creates reminders from chat commands.
 - Limits media download duration, size, queue length, and worker count through environment variables.
 
@@ -54,13 +55,14 @@ Optionally copy `.env.example` into your deployment environment and fill in the 
 ruby bot.rb
 ```
 
-The bot stores runtime state in `user_locations.json` and `reminders.json`. These files are ignored by Git because they contain chat/user state.
+The bot stores runtime state in `user_locations.json`, `user_languages.json`, and `reminders.json`. These files are ignored by Git because they contain chat/user state.
 
 ## Project Layout
 
 - `bot.rb` starts the Telegram polling loop and routes incoming messages.
 - `lib/telegram_instwitter_bot/config.rb` contains requires, constants, and environment-backed settings.
 - `lib/telegram_instwitter_bot/reminders.rb` handles reminder parsing, storage, and delivery.
+- `lib/telegram_instwitter_bot/onboarding.rb` handles `/start`, language selection, and help text.
 - `lib/telegram_instwitter_bot/time_locations.rb` handles user locations and time conversion.
 - `lib/telegram_instwitter_bot/media_jobs.rb` owns queue workers and Telegram media sending.
 - `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, and `instagram.rb` handle media lookup/download helpers.
@@ -68,7 +70,9 @@ The bot stores runtime state in `user_locations.json` and `reminders.json`. Thes
 
 ## Commands
 
-Use commands by mentioning the bot in a Telegram chat.
+In private chat, send `/start` to choose Russian or English and receive usage instructions. You can also send `/help` later to show the instructions again.
+
+Use commands by mentioning the bot in a Telegram group chat. In private chat, the mention is optional.
 
 - `@bot_username я нахожусь в Бельгии`
 - `@bot_username время`

@@ -8,6 +8,7 @@
 
 # Runtime state
 user_locations.json
+user_languages.json
 reminders.json
 *.log
 

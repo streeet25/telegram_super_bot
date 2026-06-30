@@ -14,6 +14,11 @@ require 'time'
 require 'thread'
 require 'tmpdir'
 
+# Work around telegram-bot-ruby 2.2.0 autoload ordering for callback queries.
+require 'telegram/bot/types/message'
+require 'telegram/bot/types/inaccessible_message'
+require 'telegram/bot/types/callback_query'
+
 APP_ROOT = File.expand_path("../..", __dir__)
 
 TOKEN = ENV.fetch("TELEGRAM_BOT_TOKEN") do
@@ -22,6 +27,9 @@ end
 
 # Stores user location preferences.
 USER_LOCATION_FILE = 'user_locations.json'
+
+# Stores onboarding language preferences.
+USER_LANGUAGE_FILE = 'user_languages.json'
 
 # Finds Twitter/X links in incoming messages.
 TWITTER_REGEX = %r{
