@@ -35,11 +35,14 @@ end
 def send_video_file(bot, chat_id, video_path, caption, source_name)
   return unless video_path && File.exist?(video_path)
 
-  bot.api.send_video(
+  params = {
     chat_id: chat_id,
     video: Faraday::UploadIO.new(video_path, "video/mp4"),
-    caption: caption
-  )
+    caption: caption,
+    supports_streaming: true
+  }.merge(video_upload_metadata(video_path))
+
+  bot.api.send_video(**params)
 rescue => e
   puts "Ошибка отправки в Telegram (#{source_name}): #{e.class}: #{e.message}"
   safe_send_message(bot, chat_id, "Ошибка при отправке видео: #{e.message}")

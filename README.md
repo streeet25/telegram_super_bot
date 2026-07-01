@@ -8,6 +8,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 
 - Downloads Twitter/X videos with `yt-dlp`.
 - Downloads Instagram videos with `yt-dlp`.
+- Normalizes downloaded videos for Telegram-friendly MP4 playback.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
 - Resolves Spotify track links to a concrete YouTube video link through official APIs.
 - Converts time between Moscow, Kyiv, and Brussels.
@@ -20,7 +21,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 
 - Ruby with Bundler.
 - `yt-dlp` available in `PATH`.
-- `ffmpeg` available in `PATH` for video compression.
+- `ffmpeg` available in `PATH` for video normalization and compression.
 - Python 3 and Playwright for tweet screenshots.
 - Spotify application credentials for Spotify-to-YouTube lookup.
 - YouTube Data API key for concrete YouTube video lookup.
@@ -101,12 +102,12 @@ Plain Twitter/X and Instagram post links are processed as media links. Spotify t
 | `MAX_MEDIA_LINKS_PER_MESSAGE` | `2` | Maximum media links processed from a single message. |
 | `MEDIA_QUEUE_SIZE` | `4` | Maximum queued media jobs. |
 | `MEDIA_WORKER_COUNT` | `1` | Number of media worker threads, capped at `4`. |
-| `YTDLP_MAX_FILESIZE_MB` | `48` | Maximum media file size. Set `0` to disable the size cap. |
+| `YTDLP_MAX_FILESIZE_MB` | `48` | Maximum uploaded media file size. With `ffmpeg`, downloads may temporarily use up to twice this size so the bot can compress videos before sending. Set `0` to disable the size cap. |
 | `YTDLP_MAX_DURATION_SECONDS` | `600` | Maximum video duration. Set `0` to disable the duration cap. |
 | `YTDLP_PROBE_TIMEOUT_SECONDS` | `20` | Timeout for metadata probing. |
 | `YTDLP_DOWNLOAD_TIMEOUT_SECONDS` | `90` | Timeout for media downloads. |
 | `YTDLP_SOCKET_TIMEOUT_SECONDS` | `15` | Network socket timeout passed to `yt-dlp`. |
-| `FFMPEG_TIMEOUT_SECONDS` | `120` | Timeout for compression attempts. |
+| `FFMPEG_TIMEOUT_SECONDS` | `120` | Timeout for video normalization and compression attempts. |
 | `SCREENSHOT_TIMEOUT_SECONDS` | `30` | Timeout for tweet screenshot generation. |
 | `API_HTTP_TIMEOUT_SECONDS` | `10` | Timeout for Spotify and YouTube HTTP API calls. |
 | `YTDLP_FORMAT` | Built-in format | Optional custom `yt-dlp` format selector. |
