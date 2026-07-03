@@ -102,7 +102,7 @@ def onboarding_instructions(language, bot_username)
       Language: English
 
       How to use it:
-      In private chat, send Twitter/X, Instagram, or Spotify links directly.
+      In private chat, send Twitter/X, Instagram, YouTube Shorts, or Spotify links directly.
       In group chats, mention the bot before commands: #{bot_mention}
       Group example: #{bot_mention} time 21:00
 
@@ -132,9 +132,9 @@ def onboarding_instructions(language, bot_username)
       What it does: sends a tweet screenshot/photo.
       Example: photo https://x.com/user/status/123
 
-      Command: Twitter/X or Instagram link
+      Command: Twitter/X, Instagram, or YouTube Shorts link
       What it does: downloads and sends media from the post.
-      Example: https://www.instagram.com/reel/...
+      Example: https://www.youtube.com/shorts/...
 
       Command: Spotify track link
       What it does: finds a matching YouTube link.
@@ -145,7 +145,7 @@ def onboarding_instructions(language, bot_username)
       Язык: русский
 
       Как пользоваться:
-      В личке можно просто отправить ссылку на Twitter/X, Instagram или Spotify.
+      В личке можно просто отправить ссылку на Twitter/X, Instagram, YouTube Shorts или Spotify.
       В групповых чатах перед командами упоминайте бота: #{bot_mention}
       Пример для группы: #{bot_mention} время 21:00
 
@@ -175,9 +175,9 @@ def onboarding_instructions(language, bot_username)
       Что делает: отправляет скриншот/фото твита.
       Пример: фото https://x.com/user/status/123
 
-      Команда: ссылка Twitter/X или Instagram
+      Команда: ссылка Twitter/X, Instagram или YouTube Shorts
       Что делает: скачивает и отправляет медиа из поста.
-      Пример: https://www.instagram.com/reel/...
+      Пример: https://www.youtube.com/shorts/...
 
       Команда: ссылка на Spotify-трек
       Что делает: находит подходящую YouTube-ссылку.

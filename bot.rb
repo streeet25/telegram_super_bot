@@ -2,7 +2,7 @@
 # encoding: utf-8
 # frozen_string_literal: true
 
-%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter time_locations media_jobs onboarding].each do |file|
+%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
 
@@ -208,6 +208,12 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       instagram_links = limit_media_links(bot, chat_id, extract_media_links(text, INSTAGRAM_REGEX))
       instagram_links.each do |link|
         enqueue_media_job(media_queue, bot, chat_id, { type: :instagram_video, chat_id: chat_id, link: link })
+      end
+
+      # --- 3) YouTube Shorts links ---
+      youtube_shorts_links = limit_media_links(bot, chat_id, extract_media_links(text, YOUTUBE_SHORTS_REGEX))
+      youtube_shorts_links.each do |link|
+        enqueue_media_job(media_queue, bot, chat_id, { type: :youtube_shorts_video, chat_id: chat_id, link: link })
       end
     rescue => e
       puts "Unhandled message error: #{e.class}: #{e.message}"

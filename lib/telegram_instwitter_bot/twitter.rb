@@ -68,5 +68,5 @@ def download_twitter_video(twitter_url)
     raise MediaDownloadBlocked, "Поддерживаю только ссылки на твиты. Twitter/X broadcast/live URL пропускаю."
   end
 
-  download_video_with_ytdlp(normalized_url, "tw_video_", require_success: true)
+  download_video_with_ytdlp(normalized_url, "tw_video_", require_success: true, source_name: "Twitter/X")
 end

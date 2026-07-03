@@ -90,8 +90,8 @@ def download_instagram_video_legacy(post_url)
       req.options.timeout = YTDLP_DOWNLOAD_TIMEOUT_SECONDS
     end
     if response.status == 200
-      if YTDLP_MAX_FILESIZE_BYTES && response.body.bytesize > YTDLP_MAX_FILESIZE_BYTES
-        raise MediaDownloadBlocked, "Видео больше лимита #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
+      if YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES && response.body.bytesize > YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES
+        raise MediaDownloadBlocked, "Видео больше лимита скачивания #{YTDLP_MAX_DOWNLOAD_FILESIZE_MB} МБ, пропускаю."
       end
 
       download_path = File.join(tmp_dir, file_name)

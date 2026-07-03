@@ -1,6 +1,6 @@
 # Telegram Instwitter Bot
 
-A Telegram bot that downloads and sends media from Twitter/X and Instagram links, captures tweet screenshots, converts time between Moscow, Kyiv, and Brussels, and supports simple reminders.
+A Telegram bot that downloads and sends media from Twitter/X, Instagram, and YouTube Shorts links, captures tweet screenshots, converts time between Moscow, Kyiv, and Brussels, and supports simple reminders.
 
 The bot currently understands Russian user commands and replies. Code comments and project documentation are kept in English for easier public maintenance.
 
@@ -8,6 +8,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 
 - Downloads Twitter/X videos with `yt-dlp`.
 - Downloads Instagram videos with `yt-dlp`.
+- Downloads YouTube Shorts videos with `yt-dlp`.
 - Normalizes downloaded videos for Telegram-friendly MP4 playback.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
 - Resolves Spotify track links to a concrete YouTube video link through official APIs.
@@ -66,7 +67,7 @@ The bot stores runtime state in `user_locations.json`, `user_languages.json`, an
 - `lib/telegram_instwitter_bot/onboarding.rb` handles `/start`, language selection, and help text.
 - `lib/telegram_instwitter_bot/time_locations.rb` handles user locations and time conversion.
 - `lib/telegram_instwitter_bot/media_jobs.rb` owns queue workers and Telegram media sending.
-- `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, and `instagram.rb` handle media lookup/download helpers.
+- `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, `instagram.rb`, and `youtube_shorts.rb` handle media lookup/download helpers.
 - `lib/telegram_instwitter_bot/spotify_youtube.rb` resolves Spotify tracks to YouTube video links.
 
 ## Commands
@@ -83,10 +84,10 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `где я` / `where am I` | Shows your saved location. | `@bot_username where am I` |
 | `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
 | `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
-| Twitter/X or Instagram link | Downloads and sends media from the post. | `https://www.instagram.com/reel/...` |
+| Twitter/X, Instagram, or YouTube Shorts link | Downloads and sends media from the post. | `https://www.youtube.com/shorts/...` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
-Plain Twitter/X and Instagram post links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+Plain Twitter/X, Instagram, and YouTube Shorts links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
 
 ## Environment Variables
 
@@ -102,7 +103,8 @@ Plain Twitter/X and Instagram post links are processed as media links. Spotify t
 | `MAX_MEDIA_LINKS_PER_MESSAGE` | `2` | Maximum media links processed from a single message. |
 | `MEDIA_QUEUE_SIZE` | `4` | Maximum queued media jobs. |
 | `MEDIA_WORKER_COUNT` | `1` | Number of media worker threads, capped at `4`. |
-| `YTDLP_MAX_FILESIZE_MB` | `48` | Maximum uploaded media file size. With `ffmpeg`, downloads may temporarily use up to twice this size so the bot can compress videos before sending. Set `0` to disable the size cap. |
+| `YTDLP_MAX_FILESIZE_MB` | `96` | Maximum final media file size sent to Telegram after compression. If public Bot API uploads reject files near this size, lower it or use a local Bot API server. Set `0` to disable the upload size cap. |
+| `YTDLP_MAX_DOWNLOAD_FILESIZE_MB` | `150` | Maximum source media file size downloaded before compression. With `ffmpeg`, temporary download directories may use up to twice this size during merges. Set `0` to disable the download size cap. |
 | `YTDLP_MAX_DURATION_SECONDS` | `600` | Maximum video duration. Set `0` to disable the duration cap. |
 | `YTDLP_PROBE_TIMEOUT_SECONDS` | `20` | Timeout for metadata probing. |
 | `YTDLP_DOWNLOAD_TIMEOUT_SECONDS` | `90` | Timeout for media downloads. |

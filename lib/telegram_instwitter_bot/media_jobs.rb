@@ -23,7 +23,7 @@ def cleanup_media_path(path)
   return unless path
 
   dir = File.dirname(path)
-  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|tw_shot_)/)
+  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|yt_shorts_|tw_shot_)/)
     FileUtils.remove_entry(dir)
   elsif File.exist?(path)
     File.delete(path)
@@ -78,6 +78,9 @@ def process_media_job(bot, job)
   when :instagram_video
     video_path = download_instagram_video(link)
     send_video_file(bot, chat_id, video_path, "Видео из Instagram", "Instagram")
+  when :youtube_shorts_video
+    video_path = download_youtube_shorts_video(link)
+    send_video_file(bot, chat_id, video_path, "Видео из YouTube Shorts", "YouTube Shorts")
   when :spotify_youtube
     safe_send_message(bot, chat_id, spotify_youtube_message(link))
   else

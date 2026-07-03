@@ -118,10 +118,14 @@ def bytes_to_megabytes(bytes)
 end
 
 def download_filesize_limit_bytes
-  return nil unless YTDLP_MAX_FILESIZE_BYTES
+  YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES
+end
+
+def download_dir_limit_bytes
+  return nil unless YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES
 
   multiplier = find_executable("ffmpeg") ? DOWNLOAD_DIR_LIMIT_MULTIPLIER : 1
-  YTDLP_MAX_FILESIZE_BYTES * multiplier
+  YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES * multiplier
 end
 
 def download_filesize_limit_arg
@@ -200,17 +204,17 @@ def ytdlp_auth_failure?(error_output)
   error_output.match?(/cookies|login|sign in|auth|unauthorized|forbidden|HTTP Error (?:401|403)/i)
 end
 
-def ytdlp_metadata_failure_message(error_output)
+def ytdlp_metadata_failure_message(error_output, source_name:)
   if ytdlp_auth_failure?(error_output)
-    "Не удалось получить видео из Twitter/X: похоже, нужны актуальные cookies для yt-dlp."
+    "Не удалось получить видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
   else
     "Не удалось получить метаданные видео через yt-dlp. Проверь версию yt-dlp и лог ошибки."
   end
 end
 
-def ytdlp_download_failure_message(error_output)
+def ytdlp_download_failure_message(error_output, source_name:)
   if ytdlp_auth_failure?(error_output)
-    "Не удалось скачать видео из Twitter/X: похоже, нужны актуальные cookies для yt-dlp."
+    "Не удалось скачать видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
   elsif error_output.match?(/File is larger than max-filesize|larger than max-filesize|maximum file size/i)
     "Видео не удалось уложить в лимит скачивания. Попробуй ссылку на более короткое видео или увеличь YTDLP_MAX_FILESIZE_MB."
   else
@@ -218,7 +222,7 @@ def ytdlp_download_failure_message(error_output)
   end
 end
 
-def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: false)
+def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: false, source_name: "этого источника")
   cmd = [
     ytdlp_path,
     "--no-playlist",
@@ -239,7 +243,7 @@ def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: f
   unless result.status&.success?
     error_output = command_error_output(result)
     puts "yt-dlp metadata error: #{error_output}" unless error_output.empty?
-    raise MediaDownloadBlocked, ytdlp_metadata_failure_message(error_output) if require_success
+    raise MediaDownloadBlocked, ytdlp_metadata_failure_message(error_output, source_name: source_name) if require_success
 
     return nil
   end
@@ -273,12 +277,12 @@ def validate_ytdlp_media_info!(info)
   end
 
   filesize = media_filesize_bytes(info)
-  if YTDLP_MAX_FILESIZE_BYTES && filesize && filesize > YTDLP_MAX_FILESIZE_BYTES
-    limit = download_filesize_limit_bytes
-    message = "yt-dlp metadata size #{bytes_to_megabytes(filesize)} MB exceeds upload limit #{YTDLP_MAX_FILESIZE_MB} MB"
-    message += "; download limit is #{bytes_to_megabytes(limit)} MB" if limit
-    puts message
-  end
+  return unless YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES && filesize && filesize > YTDLP_MAX_DOWNLOAD_FILESIZE_BYTES
+
+  message = "yt-dlp metadata size #{bytes_to_megabytes(filesize)} MB exceeds download limit " \
+    "#{YTDLP_MAX_DOWNLOAD_FILESIZE_MB} MB"
+  message += "; upload limit is #{YTDLP_MAX_FILESIZE_MB} MB" if YTDLP_MAX_FILESIZE_BYTES
+  puts message
 end
 
 def default_ytdlp_formats
@@ -290,7 +294,7 @@ def default_ytdlp_formats
   ]
 end
 
-def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false)
+def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false, source_name: "этого источника")
   ytdlp_path = find_executable("yt-dlp")
   unless ytdlp_path
     raise MediaDownloadBlocked, "yt-dlp не найден в PATH, поэтому видео скачать нельзя." if require_success
@@ -299,7 +303,13 @@ def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false)
   end
 
   cookie_args = ytdlp_cookie_args
-  media_info = probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: require_success)
+  media_info = probe_ytdlp_media_info(
+    ytdlp_path,
+    post_url,
+    cookie_args,
+    require_success: require_success,
+    source_name: source_name
+  )
   unless media_info
     raise MediaDownloadBlocked, "Не удалось получить метаданные видео через yt-dlp." if require_success
 
@@ -311,7 +321,7 @@ def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false)
   configured_format = ENV["YTDLP_FORMAT"].to_s.strip
   format_candidates = configured_format.empty? ? default_ytdlp_formats : [configured_format]
   filesize_limit_arg = download_filesize_limit_arg
-  max_dir_bytes = download_filesize_limit_bytes
+  max_dir_bytes = download_dir_limit_bytes
   last_error_output = nil
 
   format_candidates.each do |format|
@@ -376,7 +386,7 @@ def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false)
     raise MediaDownloadBlocked, "Видео не удалось уложить в лимит #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
   end
 
-  raise MediaDownloadBlocked, ytdlp_download_failure_message(last_error_output.to_s) if require_success
+  raise MediaDownloadBlocked, ytdlp_download_failure_message(last_error_output.to_s, source_name: source_name) if require_success
 
   nil
 end
