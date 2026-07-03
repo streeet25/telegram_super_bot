@@ -347,7 +347,18 @@ def default_ytdlp_formats
   ]
 end
 
-def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false, source_name: "этого источника")
+def instagram_ytdlp_formats
+  best_mp4 = "best[ext=mp4]/best"
+  [best_mp4, *default_ytdlp_formats.reject { |format| format == best_mp4 }]
+end
+
+def download_video_with_ytdlp(
+  post_url,
+  tmp_prefix,
+  require_success: false,
+  source_name: "этого источника",
+  format_candidates: nil
+)
   ytdlp_path = find_executable("yt-dlp")
   unless ytdlp_path
     raise MediaDownloadBlocked, "yt-dlp не найден в PATH, поэтому видео скачать нельзя." if require_success
@@ -372,7 +383,12 @@ def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false, sour
   validate_ytdlp_media_info!(media_info)
 
   configured_format = ENV["YTDLP_FORMAT"].to_s.strip
-  format_candidates = configured_format.empty? ? default_ytdlp_formats : [configured_format]
+  format_candidates =
+    if configured_format.empty?
+      format_candidates || default_ytdlp_formats
+    else
+      [configured_format]
+    end
   filesize_limit_arg = download_filesize_limit_arg
   max_dir_bytes = download_dir_limit_bytes
   last_error_output = nil
@@ -445,7 +461,12 @@ def download_video_with_ytdlp(post_url, tmp_prefix, require_success: false, sour
 end
 
 def download_instagram_video_with_ytdlp(post_url)
-  download_video_with_ytdlp(post_url, "ig_video_")
+  download_video_with_ytdlp(
+    post_url,
+    "ig_video_",
+    source_name: "Instagram",
+    format_candidates: instagram_ytdlp_formats
+  )
 end
 
 def download_instagram_video(post_url)
