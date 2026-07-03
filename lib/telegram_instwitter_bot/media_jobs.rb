@@ -79,6 +79,7 @@ end
 def process_media_job(bot, job)
   chat_id = job[:chat_id]
   link = job[:link]
+  puts "media job started: type=#{job[:type]}"
 
   case job[:type]
   when :twitter_photo
@@ -122,6 +123,7 @@ end
 
 def enqueue_media_job(media_queue, bot, chat_id, job)
   media_queue.push(job, true)
+  puts "media job enqueued: type=#{job[:type]} queue_length=#{media_queue.length}"
   true
 rescue ThreadError
   safe_send_message(bot, chat_id, "Очередь обработки медиа заполнена. Попробуйте позже.")

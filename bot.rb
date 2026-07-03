@@ -2,6 +2,10 @@
 # encoding: utf-8
 # frozen_string_literal: true
 
+# Show progress in systemd journal immediately.
+STDOUT.sync = true
+STDERR.sync = true
+
 %w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
