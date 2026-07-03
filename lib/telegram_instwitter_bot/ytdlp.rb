@@ -42,10 +42,63 @@ def transcode_video_for_telegram(input_path, output_path, ffmpeg_path, crf:, max
   run_command_with_limits(*cmd, timeout_seconds: FFMPEG_TIMEOUT_SECONDS)
 end
 
+def probe_media_streams(video_path)
+  ffprobe_path = find_executable("ffprobe")
+  return nil unless ffprobe_path
+
+  result = run_command_with_limits(
+    ffprobe_path,
+    "-v", "error",
+    "-show_entries", "stream=index,codec_type,codec_name,pix_fmt,width,height:format=format_name,duration",
+    "-of", "json",
+    video_path,
+    timeout_seconds: 10
+  )
+  return nil unless result.status&.success?
+
+  JSON.parse(result.stdout)
+rescue JSON::ParserError => e
+  puts "ffprobe stream parse error: #{e.message}"
+  nil
+end
+
+def telegram_ready_mp4?(input_path)
+  return false unless File.extname(input_path).downcase == ".mp4"
+
+  data = probe_media_streams(input_path)
+  return false unless data
+
+  format_names = data.dig("format", "format_name").to_s.split(",")
+  streams = data.fetch("streams", [])
+  video_stream = streams.find { |stream| stream["codec_type"] == "video" }
+  audio_streams = streams.select { |stream| stream["codec_type"] == "audio" }
+  return false unless video_stream
+  return false unless format_names.include?("mp4")
+
+  width = video_stream["width"].to_i
+  height = video_stream["height"].to_i
+  video_codec = video_stream["codec_name"].to_s
+  pixel_format = video_stream["pix_fmt"].to_s
+  audio_codecs = audio_streams.map { |stream| stream["codec_name"].to_s }
+
+  width.positive? &&
+    height.positive? &&
+    width.even? &&
+    height.even? &&
+    video_codec == "h264" &&
+    pixel_format == "yuv420p" &&
+    audio_codecs.all? { |codec| codec == "aac" }
+end
+
 def prepare_video_for_telegram(input_path, max_filesize_bytes)
   return input_path unless input_path && File.exist?(input_path)
 
   original_fits = max_filesize_bytes.nil? || File.size(input_path) <= max_filesize_bytes
+  if original_fits && telegram_ready_mp4?(input_path)
+    puts "video already Telegram-ready; sending original without ffmpeg transcode."
+    return input_path
+  end
+
   ffmpeg_path = find_executable("ffmpeg")
   unless ffmpeg_path
     puts "ffmpeg not found; sending original video without Telegram normalization." if original_fits
