@@ -33,7 +33,13 @@ def twitter_screenshot_python_path
   find_executable("python3")
 end
 
-def download_twitter_screenshot(twitter_url)
+def twitter_embed_url(tweet_id, dark_mode: false)
+  params = { "id" => tweet_id }
+  params["theme"] = "dark" if dark_mode
+  "https://platform.twitter.com/embed/Tweet.html?#{URI.encode_www_form(params)}"
+end
+
+def download_twitter_screenshot(twitter_url, dark_mode: false)
   normalized_url = normalize_twitter_url(twitter_url)
   tweet_id = extract_tweet_id(normalized_url)
   unless tweet_id
@@ -52,7 +58,7 @@ def download_twitter_screenshot(twitter_url)
 
   tmp_dir = Dir.mktmpdir("tw_shot_")
   output_path = File.join(tmp_dir, "#{tweet_id}.png")
-  embed_url = "https://platform.twitter.com/embed/Tweet.html?id=#{tweet_id}"
+  embed_url = twitter_embed_url(tweet_id, dark_mode: dark_mode)
 
   result = run_command_with_limits(
     python_path,

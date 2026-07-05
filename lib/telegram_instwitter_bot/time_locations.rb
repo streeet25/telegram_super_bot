@@ -56,6 +56,10 @@ def twitter_photo_request?(text)
   text.to_s.match?(%r{(?:\A|\s)/?(?:фото|photo|screenshot)(?:\s|\z)}i)
 end
 
+def twitter_photo_dark_mode?(text)
+  text.to_s.match?(/(?:\A|\s)(?:ночь|ночн[[:alpha:]]*|т[её]мн[[:alpha:]]*|dark|night)(?:\s|\z)/i)
+end
+
 def location_name(location, language = 'ru')
   if language == 'en'
     case location

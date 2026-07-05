@@ -189,8 +189,14 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       if is_bot_addressed && twitter_photo_request?(command_text)
         twitter_links = limit_media_links(bot, chat_id, extract_media_links(command_text, TWITTER_REGEX))
         if twitter_links.any?
+          dark_mode = twitter_photo_dark_mode?(command_text)
           twitter_links.each do |link|
-            enqueue_media_job(media_queue, bot, chat_id, { type: :twitter_photo, chat_id: chat_id, link: link })
+            enqueue_media_job(
+              media_queue,
+              bot,
+              chat_id,
+              { type: :twitter_photo, chat_id: chat_id, link: link, dark_mode: dark_mode }
+            )
           end
           next
         end

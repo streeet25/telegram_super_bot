@@ -88,6 +88,7 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `где я` / `where am I` | Shows your saved location. | `@bot_username where am I` |
 | `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
 | `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
+| `фото ночной <tweet>` / `photo dark <tweet>` | Sends a tweet screenshot/photo in dark mode. | `@bot_username photo dark https://x.com/user/status/123` |
 | Twitter/X, Instagram, or YouTube Shorts link | Downloads and sends media from the post. | `https://www.youtube.com/shorts/...` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 

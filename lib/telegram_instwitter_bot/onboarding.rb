@@ -132,6 +132,10 @@ def onboarding_instructions(language, bot_username)
       What it does: sends a tweet screenshot/photo.
       Example: photo https://x.com/user/status/123
 
+      Command: photo dark https://x.com/.../status/...
+      What it does: sends a tweet screenshot/photo in dark mode.
+      Example: photo dark https://x.com/user/status/123
+
       Command: Twitter/X, Instagram, or YouTube Shorts link
       What it does: downloads and sends media from the post.
       Example: https://www.youtube.com/shorts/...
@@ -174,6 +178,10 @@ def onboarding_instructions(language, bot_username)
       Команда: фото https://x.com/.../status/...
       Что делает: отправляет скриншот/фото твита.
       Пример: фото https://x.com/user/status/123
+
+      Команда: фото ночной https://x.com/.../status/...
+      Что делает: отправляет скриншот/фото твита в ночном режиме.
+      Пример: фото ночной https://x.com/user/status/123
 
       Команда: ссылка Twitter/X, Instagram или YouTube Shorts
       Что делает: скачивает и отправляет медиа из поста.

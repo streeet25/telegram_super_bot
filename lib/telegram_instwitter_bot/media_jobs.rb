@@ -83,8 +83,10 @@ def process_media_job(bot, job)
 
   case job[:type]
   when :twitter_photo
-    screenshot_path = download_twitter_screenshot(link)
-    send_photo_file(bot, chat_id, screenshot_path, "Фото из Twitter", "Twitter фото")
+    dark_mode = job[:dark_mode] == true
+    screenshot_path = download_twitter_screenshot(link, dark_mode: dark_mode)
+    caption = dark_mode ? "Фото из Twitter (ночной режим)" : "Фото из Twitter"
+    send_photo_file(bot, chat_id, screenshot_path, caption, "Twitter фото")
   when :twitter_video
     video_path = download_twitter_video(link)
     send_video_file(bot, chat_id, video_path, "Видео из Twitter", "Twitter")
