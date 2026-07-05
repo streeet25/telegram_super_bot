@@ -53,7 +53,7 @@ def current_location_request?(text)
 end
 
 def twitter_photo_request?(text)
-  text.to_s.match?(/(?:\A|\s)(?:фото|photo|screenshot)(?:\s|\z)/i)
+  text.to_s.match?(%r{(?:\A|\s)/?(?:фото|photo|screenshot)(?:\s|\z)}i)
 end
 
 def location_name(location, language = 'ru')
