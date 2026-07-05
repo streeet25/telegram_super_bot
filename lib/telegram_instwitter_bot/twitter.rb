@@ -19,6 +19,20 @@ def extract_tweet_id(twitter_url)
   match && match[1]
 end
 
+def twitter_screenshot_python_path
+  configured_path = env_value("TWITTER_SCREENSHOT_PYTHON")
+  if configured_path
+    unless File.file?(configured_path) && File.executable?(configured_path)
+      raise MediaDownloadBlocked,
+        "Не могу сделать скриншот Twitter/X: TWITTER_SCREENSHOT_PYTHON указывает на недоступный файл."
+    end
+
+    return configured_path
+  end
+
+  find_executable("python3")
+end
+
 def download_twitter_screenshot(twitter_url)
   normalized_url = normalize_twitter_url(twitter_url)
   tweet_id = extract_tweet_id(normalized_url)
@@ -26,7 +40,7 @@ def download_twitter_screenshot(twitter_url)
     raise MediaDownloadBlocked, "Фото делаю только для ссылок на твиты. Twitter/X broadcast/live URL пропускаю."
   end
 
-  python_path = find_executable("python3")
+  python_path = twitter_screenshot_python_path
   unless python_path
     raise MediaDownloadBlocked, "Не могу сделать скриншот Twitter/X: на сервере не найден python3."
   end

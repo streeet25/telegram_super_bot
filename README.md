@@ -39,9 +39,13 @@ bundle install
 Install screenshot dependencies if you need the Twitter photo command:
 
 ```sh
-python3 -m pip install playwright
-python3 -m playwright install chromium
+python3 -m venv .venv
+. .venv/bin/activate
+pip install playwright
+python -m playwright install chromium
 ```
+
+Set `TWITTER_SCREENSHOT_PYTHON` to the venv Python path when the bot service does not run with the venv activated.
 
 Set the required token:
 
@@ -111,6 +115,7 @@ Plain Twitter/X, Instagram, and YouTube Shorts links are processed as media link
 | `YTDLP_SOCKET_TIMEOUT_SECONDS` | `15` | Network socket timeout passed to `yt-dlp`. |
 | `FFMPEG_TIMEOUT_SECONDS` | `120` | Timeout for video normalization and compression attempts. |
 | `SCREENSHOT_TIMEOUT_SECONDS` | `30` | Timeout for tweet screenshot generation. |
+| `TWITTER_SCREENSHOT_PYTHON` | Empty | Optional Python executable path for tweet screenshots, for example `/home/bot/telegram_super_bot/.venv/bin/python`. |
 | `API_HTTP_TIMEOUT_SECONDS` | `10` | Timeout for Spotify and YouTube HTTP API calls. |
 | `YTDLP_FORMAT` | Built-in format | Optional custom `yt-dlp` format selector. |
 | `YTDLP_COOKIES_FILE` | Empty | Optional cookies file path for `yt-dlp`. |
