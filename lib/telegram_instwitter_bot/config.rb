@@ -40,9 +40,14 @@ TWITTER_REGEX = %r{
 }ix
 
 INSTAGRAM_REGEX = %r{
-  (https?://(?:www\.)?instagram\.com
-    /(?:reel|p|tv)
-    /[^/?\s]+
+  (https?://(?:www\.|m\.)?instagram\.com
+    /(?:
+      (?:reel|reels|p|tv)/[^/?\s]+
+      | share/(?:
+          (?:reel|reels|p|tv)/[^/?\s]+
+          | [A-Za-z0-9_-]+
+        )
+    )
     (?:/\S*)?)
 }ix
 
