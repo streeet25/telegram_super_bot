@@ -257,6 +257,12 @@ def ytdlp_auth_failure?(error_output)
   error_output.match?(/cookies|login|sign in|auth|unauthorized|forbidden|HTTP Error (?:401|403)/i)
 end
 
+def ytdlp_no_video?(error_output)
+  error_output.match?(
+    /no video (?:could be found|formats found)|(?:does not contain|contains no|has no|there is no)\s+(?:a\s+)?video|video\s+(?:not found|is unavailable)/i
+  )
+end
+
 def ytdlp_metadata_failure_message(error_output, source_name:)
   if ytdlp_auth_failure?(error_output)
     "Не удалось получить видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
@@ -296,6 +302,7 @@ def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: f
   unless result.status&.success?
     error_output = command_error_output(result)
     puts "yt-dlp metadata error: #{error_output}" unless error_output.empty?
+    raise MediaWithoutVideo, "Пост без видео, пропускаю." if ytdlp_no_video?(error_output)
     raise MediaDownloadBlocked, ytdlp_metadata_failure_message(error_output, source_name: source_name) if require_success
 
     return nil
@@ -316,8 +323,23 @@ def media_filesize_bytes(info)
   [info["filesize"], info["filesize_approx"]].compact.map(&:to_i).max
 end
 
+def ytdlp_media_info_has_video?(info)
+  formats = Array(info["formats"])
+  vcodec = info["vcodec"].to_s
+  return false if !vcodec.empty? && vcodec == "none"
+  return true if !vcodec.empty?
+  return true if formats.empty?
+
+  formats.any? do |format|
+    format_vcodec = format["vcodec"].to_s
+    !format_vcodec.empty? && format_vcodec != "none"
+  end
+end
+
 def validate_ytdlp_media_info!(info)
   return unless info
+
+  raise MediaWithoutVideo, "Пост без видео, пропускаю." unless ytdlp_media_info_has_video?(info)
 
   if live_media_info?(info)
     raise MediaDownloadBlocked, "Трансляции и live-видео не скачиваю, чтобы не перегружать сервер."
@@ -430,6 +452,10 @@ def download_video_with_ytdlp(
     unless result.status&.success?
       error_output = command_error_output(result)
       puts "yt-dlp error (format #{format}): #{error_output}" unless error_output.empty?
+      if ytdlp_no_video?(error_output)
+        FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
+        raise MediaWithoutVideo, "Пост без видео, пропускаю."
+      end
       last_error_output = error_output unless error_output.empty?
       FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
       next

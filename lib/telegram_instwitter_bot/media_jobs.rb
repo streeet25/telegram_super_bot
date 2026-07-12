@@ -101,6 +101,8 @@ def process_media_job(bot, job)
   else
     puts "Unknown media job type: #{job[:type]}"
   end
+rescue MediaWithoutVideo => e
+  puts "media skipped (#{job[:type]}): #{e.message}"
 rescue MediaDownloadBlocked => e
   puts "media blocked (#{job[:type]}): #{e.message}"
   safe_send_message(bot, chat_id, e.message)
