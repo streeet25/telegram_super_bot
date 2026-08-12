@@ -7,7 +7,9 @@ The bot currently understands Russian user commands and replies. Code comments a
 ## Features
 
 - Downloads Twitter/X videos with `yt-dlp`.
-- Downloads Instagram videos with `yt-dlp`.
+- Downloads Instagram and public Telegram-channel videos with `yt-dlp`.
+- Combines 2–10 supported video links from one message into one Telegram media-group post.
+- Re-sends a post assembled from the most recently sent videos in the chat.
 - Downloads YouTube Shorts videos with `yt-dlp`.
 - Normalizes downloaded videos for Telegram-friendly MP4 playback.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
@@ -89,10 +91,11 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
 | `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
 | `фото ночной <tweet>` / `photo dark <tweet>` | Sends a tweet screenshot/photo in dark mode. | `@bot_username photo dark https://x.com/user/status/123` |
-| Twitter/X, Instagram, or YouTube Shorts link | Downloads and sends media from the post. | `https://www.youtube.com/shorts/...` |
+| 2–10 Twitter/X, Instagram, YouTube Shorts, or public Telegram-channel links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://t.me/channel/123` |
+| `собери пост из последних 3 видео` | Re-sends the last 2–10 videos previously sent by the bot in this chat as one post. | `@bot_username собери пост из последних 3 видео` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
-Plain Twitter/X, Instagram, and YouTube Shorts links are processed as media links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+Plain Twitter/X, Instagram, YouTube Shorts, and public Telegram-channel post links are processed as video links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
 
 ## Environment Variables
 
@@ -105,7 +108,8 @@ Plain Twitter/X, Instagram, and YouTube Shorts links are processed as media link
 | `YOUTUBE_API_KEY` | Empty | YouTube Data API key for direct video search. |
 | `YOUTUBE_REGION_CODE` | Empty | Optional YouTube search region code, for example `US` or `BE`. |
 | `YOUTUBE_SEARCH_RESULTS` | `5` | Number of YouTube candidates to score, capped at `10`. |
-| `MAX_MEDIA_LINKS_PER_MESSAGE` | `2` | Maximum media links processed from a single message. |
+| `MAX_MEDIA_LINKS_PER_MESSAGE` | `10` | Maximum video links combined into one Telegram media group (capped at 10). |
+| `MAX_MEDIA_HISTORY_PER_CHAT` | `50` | Number of bot-sent videos remembered per chat for the “recent videos” command. |
 | `MEDIA_QUEUE_SIZE` | `4` | Maximum queued media jobs. |
 | `MEDIA_WORKER_COUNT` | `1` | Number of media worker threads, capped at `4`. |
 | `YTDLP_MAX_FILESIZE_MB` | `96` | Maximum final media file size sent to Telegram after compression. If public Bot API uploads reject files near this size, lower it or use a local Bot API server. Set `0` to disable the upload size cap. |

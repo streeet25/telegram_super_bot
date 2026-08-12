@@ -10,6 +10,7 @@
 user_locations.json
 user_languages.json
 reminders.json
+media_history.json
 *.log
 
 # Bundler and Ruby tooling

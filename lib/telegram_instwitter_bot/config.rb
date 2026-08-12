@@ -31,6 +31,9 @@ USER_LOCATION_FILE = 'user_locations.json'
 # Stores onboarding language preferences.
 USER_LANGUAGE_FILE = 'user_languages.json'
 
+# Stores recently sent video file IDs, per chat, so they can be re-used in a post.
+MEDIA_HISTORY_FILE = 'media_history.json'
+
 # Finds Twitter/X links in incoming messages.
 TWITTER_REGEX = %r{
   (https?://           # http:// or https://
@@ -58,6 +61,14 @@ YOUTUBE_SHORTS_REGEX = %r{
     (?:[/?#]\S*)?)
 }ix
 
+# Public Telegram channel post links. Private channels cannot be downloaded unless
+# the configured yt-dlp cookies/session has access to them.
+TELEGRAM_POST_REGEX = %r{
+  (https?://(?:t\.me|telegram\.me)
+    /(?:s/)?[A-Za-z0-9_]+/\d+
+    (?:[/?#]\S*)?)
+}ix
+
 SPOTIFY_TRACK_REGEX = %r{
   (https?://open\.spotify\.com
     /(?:intl-[a-z]{2}/)?
@@ -72,7 +83,9 @@ REMINDERS_FILE = 'reminders.json'
 REMINDER_REGEX = /^(?:задрочи|оповести|напомни)\s+время\s+(\d{1,2})(?::(\d{2}))?\s*(?:по\s+(.+?))?\s+(.+)$/i
 ENGLISH_REMINDER_REGEX = %r{^/?remind(?:\s+me)?(?:\s+(?:at|time))?\s+(\d{1,2})(?::(\d{2}))?\s*(?:(?:in|for)\s+(.+?))?\s+(.+)$}i
 
-MAX_MEDIA_LINKS_PER_MESSAGE = [(ENV["MAX_MEDIA_LINKS_PER_MESSAGE"] || "2").to_i, 1].max
+# Telegram media groups accept at most 10 items.
+MAX_MEDIA_LINKS_PER_MESSAGE = [[(ENV["MAX_MEDIA_LINKS_PER_MESSAGE"] || "10").to_i, 1].max, 10].min
+MAX_MEDIA_HISTORY_PER_CHAT = [[(ENV["MAX_MEDIA_HISTORY_PER_CHAT"] || "50").to_i, 10].max, 200].min
 MEDIA_QUEUE_SIZE = [(ENV["MEDIA_QUEUE_SIZE"] || "4").to_i, 1].max
 MEDIA_WORKER_COUNT = [[(ENV["MEDIA_WORKER_COUNT"] || "1").to_i, 1].max, 4].min
 

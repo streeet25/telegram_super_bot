@@ -503,3 +503,12 @@ def download_instagram_video(post_url)
   legacy_path = download_instagram_video_legacy(post_url)
   prepare_video_for_telegram(legacy_path, YTDLP_MAX_FILESIZE_BYTES)
 end
+
+def download_telegram_video(post_url)
+  download_video_with_ytdlp(
+    post_url,
+    "tg_video_",
+    require_success: true,
+    source_name: "Telegram"
+  )
+end

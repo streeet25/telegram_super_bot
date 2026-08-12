@@ -202,29 +202,41 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         end
       end
 
-      # --- 5) Spotify links ---
+      # --- 5) Assemble a post from video links or from recently sent videos. ---
+      recent_post_pattern = %r{
+        \A(?:
+          (?:собери\s+(?:пост|подборку)\s+из\s+последних|собери\s+последние)\s+(\d{1,2})\s+(?:видео|ролик(?:а|ов)?)
+          |
+          (?:assemble|make)\s+(?:a\s+)?(?:post|collection)\s+from\s+(?:the\s+)?last\s+(\d{1,2})\s+videos?
+        )\s*\z
+      }ix
+      if is_bot_addressed && (match = command_text.match(recent_post_pattern))
+        count = (match[1] || match[2]).to_i
+        if count.between?(2, 10)
+          enqueue_media_job(media_queue, bot, chat_id, { type: :recent_video_post, chat_id: chat_id, count: count })
+        else
+          safe_send_message(bot, chat_id, "Можно собрать пост из 2–10 последних видео.")
+        end
+        next
+      end
+
+      video_link_items = extract_video_link_items(text)
+      unless video_link_items.empty?
+        received_link_count = video_link_items.size
+        video_link_items = video_link_items.first(MAX_MEDIA_LINKS_PER_MESSAGE)
+        if received_link_count > video_link_items.size
+          safe_send_message(bot, chat_id, "В одном посте обрабатываю первые #{MAX_MEDIA_LINKS_PER_MESSAGE} видео-ссылок.")
+        end
+        enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items })
+        next
+      end
+
+      # --- 6) Spotify links ---
       spotify_links = limit_media_links(bot, chat_id, extract_media_links(text, SPOTIFY_TRACK_REGEX))
       spotify_links.each do |link|
         enqueue_media_job(media_queue, bot, chat_id, { type: :spotify_youtube, chat_id: chat_id, link: link })
       end
 
-      # --- 1) Twitter / X links ---
-      twitter_links = limit_media_links(bot, chat_id, extract_media_links(text, TWITTER_REGEX))
-      twitter_links.each do |link|
-        enqueue_media_job(media_queue, bot, chat_id, { type: :twitter_video, chat_id: chat_id, link: link })
-      end
-
-      # --- 2) Instagram links ---
-      instagram_links = limit_media_links(bot, chat_id, extract_media_links(text, INSTAGRAM_REGEX))
-      instagram_links.each do |link|
-        enqueue_media_job(media_queue, bot, chat_id, { type: :instagram_video, chat_id: chat_id, link: link })
-      end
-
-      # --- 3) YouTube Shorts links ---
-      youtube_shorts_links = limit_media_links(bot, chat_id, extract_media_links(text, YOUTUBE_SHORTS_REGEX))
-      youtube_shorts_links.each do |link|
-        enqueue_media_job(media_queue, bot, chat_id, { type: :youtube_shorts_video, chat_id: chat_id, link: link })
-      end
     rescue => e
       puts "Unhandled message error: #{e.class}: #{e.message}"
     end
