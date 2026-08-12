@@ -124,34 +124,28 @@ ensure
   cleanup_media_path(video_path)
 end
 
-def video_media_item(video_path, caption: nil, metadata: {})
-  Telegram::Bot::Types::InputMediaVideo.new(
-    type: "video",
-    media: Faraday::UploadIO.new(video_path, "video/mp4"),
-    caption: caption,
-    supports_streaming: true,
-    **metadata
-  )
-end
-
-def file_id_media_item(file_id, caption: nil)
-  Telegram::Bot::Types::InputMediaVideo.new(
-    type: "video",
-    media: file_id,
-    caption: caption,
-    supports_streaming: true
-  )
+def video_media_payload(media, caption: nil, metadata: {})
+  {
+    "type" => "video",
+    "media" => media,
+    "supports_streaming" => true
+  }.merge(metadata.transform_keys(&:to_s)).tap do |payload|
+    payload["caption"] = caption unless caption.to_s.empty?
+  end
 end
 
 def send_video_album(bot, chat_id, videos, caption: "")
+  uploads = {}
   media = videos.each_with_index.map do |video, index|
-    video_media_item(
-      video.fetch(:path),
+    attachment_name = "video_#{index}"
+    uploads[attachment_name.to_sym] = Faraday::UploadIO.new(video.fetch(:path), "video/mp4")
+    video_media_payload(
+      "attach://#{attachment_name}",
       caption: index.zero? ? caption : nil,
       metadata: video.fetch(:metadata, {})
     )
   end
-  response = bot.api.send_media_group(chat_id: chat_id, media: media)
+  response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media), **uploads)
   record_sent_videos(chat_id, response, sources: videos.map { |video| video[:source] })
   response
 rescue => e
@@ -205,9 +199,9 @@ def send_recent_videos_as_post(bot, chat_id, count)
   end
 
   media = videos.each_with_index.map do |video, index|
-    file_id_media_item(video.fetch("file_id"), caption: index.zero? ? "Подборка из последних #{count} видео" : nil)
+    video_media_payload(video.fetch("file_id"), caption: index.zero? ? "Подборка из последних #{count} видео" : nil)
   end
-  response = bot.api.send_media_group(chat_id: chat_id, media: media)
+  response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media))
   record_sent_videos(chat_id, response, sources: videos.map { |video| video["source"] })
 rescue => e
   puts "recent video post error: #{e.class}: #{e.message}"
