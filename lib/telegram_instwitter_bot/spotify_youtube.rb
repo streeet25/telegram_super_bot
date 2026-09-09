@@ -148,19 +148,32 @@ def normalized_match_text(text)
   text.to_s.downcase.gsub(/[^[:alnum:]\s]/, " ").squeeze(" ").strip
 end
 
+def youtube_video_mentions_track_artist?(track, video)
+  title = normalized_match_text(video[:title])
+  channel = normalized_match_text(video[:channel_title])
+
+  track[:artists].any? do |artist|
+    normalized_artist = normalized_match_text(artist)
+    !normalized_artist.empty? && (title.include?(normalized_artist) || channel.include?(normalized_artist))
+  end
+end
+
 def youtube_video_score(track, video)
   title = normalized_match_text(video[:title])
   channel = normalized_match_text(video[:channel_title])
   track_name = normalized_match_text(track[:name])
-  main_artist = normalized_match_text(track[:artists].first)
+  matching_artists = track[:artists].map { |artist| normalized_match_text(artist) }.reject(&:empty?)
   original_track_name = track_name
   score = 0
 
   score += 60 if !track_name.empty? && title.include?(track_name)
-  score += 35 if !main_artist.empty? && title.include?(main_artist)
+  matching_artists.each do |artist|
+    score += 80 if title.include?(artist)
+    score += 55 if channel.include?(artist)
+  end
   score += 30 if title.include?("official audio")
   score += 22 if title.include?("official video")
-  score += 15 if !main_artist.empty? && (channel.include?(main_artist) || channel.include?("topic"))
+  score += 15 if channel.include?("topic") && matching_artists.any? { |artist| channel.include?(artist) }
   score += 8 if title.include?("audio")
 
   penalties = ["cover", "karaoke", "instrumental", "reaction", "nightcore", "sped up", "slowed", "8d"]
@@ -183,12 +196,18 @@ def youtube_video_score(track, video)
 end
 
 def find_youtube_video_for_spotify_track(track)
-  query = "#{track[:artist_names]} #{track[:name]} official audio"
-  videos = youtube_search_videos(query)
-  videos = youtube_search_videos("#{track[:artist_names]} #{track[:name]}") if videos.empty?
-  return nil if videos.empty?
+  queries = [
+    "#{track[:artist_names]} #{track[:name]}",
+    "#{track[:artist_names]} - #{track[:name]}"
+  ]
+  queries << track[:isrc] if track[:isrc] && !track[:isrc].empty?
 
-  videos.max_by { |video| youtube_video_score(track, video) }
+  videos = queries.flat_map { |query| youtube_search_videos(query) }
+                  .uniq { |video| video[:id] }
+  artist_matched_videos = videos.select { |video| youtube_video_mentions_track_artist?(track, video) }
+  return nil if artist_matched_videos.empty?
+
+  artist_matched_videos.max_by { |video| youtube_video_score(track, video) }
 end
 
 def spotify_youtube_message(spotify_url)

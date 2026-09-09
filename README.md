@@ -13,7 +13,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 - Downloads YouTube Shorts videos with `yt-dlp`.
 - Normalizes downloaded videos for Telegram-friendly MP4 playback.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
-- Resolves Spotify track links to a concrete YouTube video link through official APIs.
+- Resolves Spotify track links to a concrete YouTube video link through official APIs, requiring an artist match to avoid selecting identically named tracks by another artist.
 - Converts time between Moscow, Kyiv, and Brussels.
 - Stores per-user location preferences.
 - Stores per-user onboarding language preferences.
