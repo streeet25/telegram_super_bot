@@ -12,7 +12,6 @@ def media_source_for_link(link)
   return :twitter if link.match?(TWITTER_REGEX)
   return :instagram if link.match?(INSTAGRAM_REGEX)
   return :youtube_shorts if link.match?(YOUTUBE_SHORTS_REGEX)
-  return :telegram if link.match?(TELEGRAM_POST_REGEX)
 
   nil
 end
@@ -47,7 +46,7 @@ def cleanup_media_path(path)
   return unless path
 
   dir = File.dirname(path)
-  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|yt_shorts_|tg_video_|tw_shot_)/)
+  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|yt_shorts_|tw_shot_)/)
     FileUtils.remove_entry(dir)
   elsif File.exist?(path)
     File.delete(path)
@@ -161,7 +160,6 @@ def download_video_item(item)
          when :twitter then download_twitter_video(item.fetch(:link))
          when :instagram then download_instagram_video(item.fetch(:link))
          when :youtube_shorts then download_youtube_shorts_video(item.fetch(:link))
-         when :telegram then download_telegram_video(item.fetch(:link))
          end
   return nil unless path
 

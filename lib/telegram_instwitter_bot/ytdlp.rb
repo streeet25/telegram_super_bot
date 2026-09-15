@@ -254,7 +254,7 @@ rescue JSON::ParserError => e
 end
 
 def ytdlp_auth_failure?(error_output)
-  error_output.match?(/cookies|login|sign in|auth|unauthorized|forbidden|HTTP Error (?:401|403)/i)
+  error_output.match?(/cookies|login|sign in|auth|unauthorized|forbidden|page needs to be reloaded|HTTP Error (?:401|403)/i)
 end
 
 def ytdlp_no_video?(error_output)
@@ -490,6 +490,7 @@ def download_instagram_video_with_ytdlp(post_url)
   download_video_with_ytdlp(
     post_url,
     "ig_video_",
+    require_success: !ENABLE_INSTAGRAM_LEGACY_FETCH,
     source_name: "Instagram",
     format_candidates: instagram_ytdlp_formats
   )
@@ -502,13 +503,4 @@ def download_instagram_video(post_url)
   puts "yt-dlp unavailable or failed; falling back to legacy Instagram fetch."
   legacy_path = download_instagram_video_legacy(post_url)
   prepare_video_for_telegram(legacy_path, YTDLP_MAX_FILESIZE_BYTES)
-end
-
-def download_telegram_video(post_url)
-  download_video_with_ytdlp(
-    post_url,
-    "tg_video_",
-    require_success: true,
-    source_name: "Telegram"
-  )
 end

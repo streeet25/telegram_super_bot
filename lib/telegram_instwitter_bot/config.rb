@@ -61,14 +61,6 @@ YOUTUBE_SHORTS_REGEX = %r{
     (?:[/?#]\S*)?)
 }ix
 
-# Public Telegram channel post links. Private channels cannot be downloaded unless
-# the configured yt-dlp cookies/session has access to them.
-TELEGRAM_POST_REGEX = %r{
-  (https?://(?:t\.me|telegram\.me)
-    /(?:s/)?[A-Za-z0-9_]+/\d+
-    (?:[/?#]\S*)?)
-}ix
-
 SPOTIFY_TRACK_REGEX = %r{
   (https?://open\.spotify\.com
     /(?:intl-[a-z]{2}/)?

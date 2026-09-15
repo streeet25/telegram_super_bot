@@ -7,7 +7,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 ## Features
 
 - Downloads Twitter/X videos with `yt-dlp`.
-- Downloads Instagram and public Telegram-channel videos with `yt-dlp`.
+- Downloads Instagram videos with `yt-dlp`.
 - Combines 2–10 supported video links from one message into one Telegram media-group post.
 - Re-sends a post assembled from the most recently sent videos in the chat.
 - Downloads YouTube Shorts videos with `yt-dlp`.
@@ -63,6 +63,8 @@ Optionally copy `.env.example` into your deployment environment and fill in the 
 ruby bot.rb
 ```
 
+Production deployment details are in [DEPLOYMENT.md](DEPLOYMENT.md).
+
 The bot stores runtime state in `user_locations.json`, `user_languages.json`, and `reminders.json`. These files are ignored by Git because they contain chat/user state.
 
 ## Project Layout
@@ -91,11 +93,11 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
 | `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
 | `фото ночной <tweet>` / `photo dark <tweet>` | Sends a tweet screenshot/photo in dark mode. | `@bot_username photo dark https://x.com/user/status/123` |
-| 2–10 Twitter/X, Instagram, YouTube Shorts, or public Telegram-channel links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://t.me/channel/123` |
+| 2–10 Twitter/X, Instagram, or YouTube Shorts links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://www.youtube.com/shorts/...` |
 | `собери пост из последних 3 видео` | Re-sends the last 2–10 videos previously sent by the bot in this chat as one post. | `@bot_username собери пост из последних 3 видео` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
-Plain Twitter/X, Instagram, YouTube Shorts, and public Telegram-channel post links are processed as video links. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+Plain Twitter/X, Instagram, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
 
 ## Environment Variables
 
