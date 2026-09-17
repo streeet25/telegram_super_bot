@@ -285,6 +285,9 @@ def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: f
   cmd = [
     ytdlp_path,
     "--no-playlist",
+    # A post can expose several media entries (including a quoted post). Keep the
+    # extractor's first entry instead of later choosing a downloaded file by name.
+    "--playlist-items", "1",
     "--no-warnings",
     "--no-progress",
     "--dump-json",
@@ -421,6 +424,7 @@ def download_video_with_ytdlp(
     cmd = [
       ytdlp_path,
       "--no-playlist",
+      "--playlist-items", "1",
       "--no-warnings",
       "--no-progress",
       "--match-filter", "!is_live",
