@@ -58,7 +58,7 @@ class PhotoPostsTest < Minitest::Test
 
   def build_message(id, photos: [], **attrs)
     OpenStruct.new({
-      message_id: id, chat: OpenStruct.new(id: 10), from: OpenStruct.new(id: 20),
+      message_id: id, date: Time.utc(2026, 10, 7, 11, 30).to_i, chat: OpenStruct.new(id: 10), from: OpenStruct.new(id: 20),
       photo: photos, caption_entities: []
     }.merge(attrs))
   end
@@ -153,10 +153,11 @@ class PhotoPostsTest < Minitest::Test
     assert_equal ['photo-4'], @store.reserve('10:20:5', nil).map { |entry| entry['file_id'] }
   end
 
-  def test_undirected_group_photos_and_commands_are_ignored
-    refute handle(build_message(1, photos: [photo_size('unrelated', 640, 480)]), addressed: false)
+  def test_undirected_group_photos_are_collected_silently_but_commands_require_mention
+    assert handle(build_message(1, photos: [photo_size('group-photo', 640, 480)]), addressed: false)
     refute handle(build_message(2), 'собери пост', addressed: false)
-    refute File.exist?(@file)
+    assert_equal 'group-photo', @store.reserve(@scope, nil).first['file_id']
+    assert_empty @api.calls
     assert @queue.empty?
   end
 
@@ -330,5 +331,120 @@ class PhotoPostsTest < Minitest::Test
   def test_atomic_save_does_not_leave_temporary_files
     receive(1)
     assert_equal ['photos.json'], Dir.children(@directory)
+  end
+
+  def test_time_command_variations
+    ['собери пост за сегодня', 'собери подборку из фото за сегодня', 'make a photo post from today'].each do |text|
+      assert_equal({ count: nil, period: :today }, photo_post_request(text))
+    end
+    {
+      'собери пост за 1 час' => 1,
+      'собери пост за час' => 1,
+      'собери пост за последний час' => 1,
+      'собери пост за 2 часа' => 2,
+      'собери пост за последние 2 часа' => 2,
+      'собери пост из фото за последних 5 часов' => 5,
+      'assemble post from the last 2 hours' => 2,
+      'make a post from last hour' => 1
+    }.each do |text, hours|
+      assert_equal({ count: nil, period: hours * 3600 }, photo_post_request(text), text)
+    end
+    ['собери пост за завтра', 'собери пост за -1 час', 'собери пост за 1.5 часа'].each do |text|
+      assert_nil photo_post_request(text)
+    end
+  end
+
+  def test_photo_keeps_telegram_message_timestamp_not_processing_time_or_forward_date
+    receive(1, date: 12345, forward_date: 500)
+    assert_equal 12345, @store.reserve(@scope, nil).first['sent_at']
+  end
+
+  def test_one_hour_includes_exact_boundary_and_excludes_older_and_future_photos
+    now = Time.utc(2026, 10, 7, 11, 30).to_i
+    [now - 3601, now - 3600, now - 1, now, now + 1].each_with_index do |timestamp, id|
+      @store.record(@scope, photo_entry(id, sent_at: timestamp))
+    end
+    selected = @store.reserve(@scope, nil, period: 3600, now: now)
+    assert_equal [1, 2, 3], selected.map { |p| p['message_id'] }
+  end
+
+  def test_two_hours_span_midnight_and_include_already_assembled_photos
+    now = Time.new(2026, 10, 7, 0, 30, 0, '+03:00').to_i
+    @store.record(@scope, photo_entry(1, sent_at: now - 7100, assembled: true))
+    @store.record(@scope, photo_entry(2, sent_at: now - 100))
+    @store.record(@scope, photo_entry(3, sent_at: now - 7201))
+    selected = @store.reserve(@scope, nil, period: 7200, now: now)
+    assert_equal [1, 2], selected.map { |p| p['message_id'] }
+  end
+
+  def test_today_uses_moscow_midnight_not_server_day
+    now = Time.utc(2026, 10, 6, 21, 30).to_i # October 7, 00:30 at UTC+3.
+    midnight = Time.utc(2026, 10, 6, 21).to_i
+    [midnight - 1, midnight, now, now + 1].each_with_index do |timestamp, id|
+      @store.record(@scope, photo_entry(id, sent_at: timestamp))
+    end
+    assert_equal [1, 2], @store.reserve(@scope, nil, period: :today, now: now).map { |p| p['message_id'] }
+  end
+
+  def test_today_handles_new_year_boundary
+    now = Time.new(2027, 1, 1, 0, 1, 0, '+03:00').to_i
+    @store.record(@scope, photo_entry(1, sent_at: now - 61))
+    @store.record(@scope, photo_entry(2, sent_at: now - 60))
+    assert_equal [2], @store.reserve(@scope, nil, period: :today, now: now).map { |p| p['message_id'] }
+  end
+
+  def test_legacy_photos_without_dates_remain_available_by_count
+    @store.record(@scope, photo_entry(1))
+    before = File.read(@file)
+    error = assert_raises(PhotoPostError) { @store.reserve(@scope, nil, period: :today) }
+    assert_includes error.message, 'нет времени отправки'
+    assert_equal before, File.read(@file)
+    assert_equal 1, @store.reserve(@scope, 1).size
+  end
+
+  def test_empty_time_window_and_zero_hours_do_not_reserve_or_send
+    send_command('собери пост за 0 часов')
+    assert_includes @api.calls.last[1][:text], 'положительное'
+    send_command('собери пост за 2 часа')
+    assert_includes @api.calls.last[1][:text], 'За этот период'
+    assert @queue.empty?
+    receive(1)
+    send_command('собери пост за 1 час')
+    assert_equal 1, @queue.size
+  end
+
+  def test_large_time_window_is_not_silently_truncated
+    (1..11).each { |id| receive(id) }
+    before = File.read(@file)
+    send_command('собери пост за сегодня')
+    assert @queue.empty?
+    assert_equal before, File.read(@file)
+    assert_includes @api.calls.last[1][:text], 'найдено 11'
+  end
+
+  def test_group_photos_can_be_assembled_by_time_with_mentioned_command
+    now = Time.utc(2026, 10, 7, 11, 30).to_i
+    [now - 3700, now - 3500, now - 10].each_with_index do |timestamp, id|
+      handle(build_message(id, date: timestamp, photos: [photo_size("group-#{id}", 640, 480)]), addressed: false)
+    end
+    assert_empty @api.calls
+    send_command('собери пост за 1 час', date: now)
+    receive(4, date: now + 1)
+    run_job
+    assert_equal ['group-1', 'group-2'], JSON.parse(delivered_media.last[1][:media]).map { |p| p['media'] }
+    assert_equal ['group-0', 'photo-4'], @store.reserve(@scope, nil).map { |p| p['file_id'] }
+  end
+
+  def test_timestamps_survive_restart_and_time_selection_remains_user_scoped
+    receive(1)
+    receive(2, from: OpenStruct.new(id: 21))
+    fresh_store = PhotoPostStore.new(@file)
+    selected = fresh_store.reserve(@scope, nil, period: 3600, now: Time.utc(2026, 10, 7, 11, 30).to_i)
+    assert_equal ['photo-1'], selected.map { |p| p['file_id'] }
+  end
+
+  def test_bot_messages_are_not_collected
+    refute handle(build_message(1, from: OpenStruct.new(id: 42, is_bot: true), photos: [photo_size('bot-photo', 640, 480)]))
+    refute File.exist?(@file)
   end
 end

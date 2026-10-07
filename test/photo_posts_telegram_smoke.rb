@@ -69,6 +69,14 @@ Dir.mktmpdir('photo-telegram-smoke-') do |dir|
   process_media_job(bot, queue.pop(true))
   check(requests.size == 2 && requests[1][0] == :photo, 'Expected one standalone photo request')
   check(requests[1][1]['photo'] == 'photo-2', 'Wrong recent photo')
+  # Ordinary group photos arrive without a mention; the command is addressed.
+  group_photo = typed_message(5, date: 7200, chat: { id: -10, type: 'group', title: 'Test' },
+    photo: [{ file_id: 'group-photo', file_unique_id: 'group-unique', width: 640, height: 480 }])
+  check(handle_photo_post_message(bot, queue, group_photo, '', addressed: false, bot_username: 'test_bot', store: store), 'Unmentioned group photo was ignored')
+  command = typed_message(6, date: 7300, chat: { id: -10, type: 'group', title: 'Test' })
+  handle_photo_post_message(bot, queue, command, 'собери пост за 2 часа', addressed: true, bot_username: 'test_bot', store: store)
+  process_media_job(bot, queue.pop(true))
+  check(requests.size == 3 && requests[2][1]['photo'] == 'group-photo', 'Group time selection failed')
   check(media_source_for_link('https://t.me/example/123').nil?, 'Telegram link regression')
   %w[ru en].each do |language|
     check(onboarding_instructions(language, 'test_bot').length <= 4096, 'Help exceeds Telegram message limit')

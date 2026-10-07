@@ -148,7 +148,9 @@ def onboarding_instructions(language, bot_username)
       What it does: combines your new photos into a forwardable album (up to 10). One photo is sent on its own.
       Command: assemble post from last 3 photos
       What it does: selects your last 3 photos in this chat. Captions and order are preserved. Successfully assembled photos are not included in the next plain "assemble post".
-      Send images as photos, not files. In groups, mention the bot in the photo caption or reply to its message; it must be able to receive those photos.
+      Command: assemble post from today / assemble post from last 2 hours
+      What it does: selects your saved photos by the time you sent them, including previously assembled photos. "Today" starts at midnight Moscow time (UTC+3). At most 10 photos; choose a shorter period if there are more.
+      Send images as photos, not files. Group photos are saved silently without a mention; mention the bot only in the command. It must be an admin or have Privacy Mode disabled to receive ordinary group photos. Photos missed before this update must be resent.
 
       Command: Spotify track link
       What it does: finds a matching YouTube link.
@@ -205,7 +207,9 @@ def onboarding_instructions(language, bot_username)
       Что делает: собирает твои новые фото в альбом для пересылки (до 10). Одно фото отправляет отдельно.
       Команда: собери пост из последних 3 фото
       Что делает: выбирает последние 3 твоих фото в этом чате. Порядок и подписи сохраняются. Уже собранные фото не попадают в следующую команду «собери пост» без числа.
-      Присылай изображения как фото, не файлом. В группе упомяни бота в подписи к фото или ответь на его сообщение; бот должен видеть эти фотографии.
+      Команды: собери пост за сегодня / собери пост за 1 час / собери пост за 2 часа
+      Что делает: выбирает сохранённые фото по времени отправки, включая уже собранные. «Сегодня» — с 00:00 по Москве (UTC+3). Максимум 10 фото; если больше — выбери меньший период.
+      Присылай изображения как фото, не файлом. Фото в группе сохраняются молча без упоминания; упомяни бота только в команде. Чтобы получать обычные фото группы, бот должен быть администратором или иметь отключённый Privacy Mode. Пропущенные до обновления фото пришли повторно.
 
       Команда: ссылка на Spotify-трек
       Что делает: находит подходящую YouTube-ссылку.

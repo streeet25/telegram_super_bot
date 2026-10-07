@@ -99,6 +99,8 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `собери пост из последних 3 видео` | Re-sends the last 2–10 videos previously sent by the bot in this chat as one post. | `@bot_username собери пост из последних 3 видео` |
 | `собери пост` / `assemble post` / `/post` | Sends your new uploaded photos as one forwardable album (2–10 photos), or one standalone photo. | Send photos, then send `собери пост` separately. |
 | `собери пост из последних 3 фото` / `assemble post from last 3 photos` | Selects the last 1–10 photos sent by you in this chat/topic. | `собери пост из последних 3 фото` |
+| `собери пост за сегодня` / `assemble post from today` | Selects your saved photos sent since midnight Moscow time (UTC+3). | `@bot_username собери пост за сегодня` |
+| `собери пост за 1 час` / `собери пост за 2 часа` / `assemble post from last 2 hours` | Selects your saved photos sent during the requested number of hours before the command. | `@bot_username собери пост за 2 часа` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
 Plain Twitter/X, Instagram, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
@@ -119,10 +121,21 @@ are kept for the next post, even while the first post waits in the media queue.
 Up to 50 photos are remembered per chat/sender/topic, across restarts. Older assembled
 entries are trimmed first; if all 50 are pending, new photos are refused with a notice.
 
-In groups, address the bot in each photo's caption or reply to the bot. Further photos
-of a recognized album are accepted for the same sender and topic. Group privacy settings
-must let the bot receive the photos; private chat is the simplest workflow. Protected
-photos are not collected. Photo history is separate from the existing video history.
+Time commands select all remembered photos in the requested window, including already
+assembled photos. The window ends at the command's Telegram message timestamp, so a
+queue delay does not change the result. For forwarded photos, the relevant timestamp
+is when they were sent to this chat, not the original post date. "Today" uses a fixed
+UTC+3 midnight, independent of the server timezone. More than 10 matching photos causes
+a notice instead of silently truncating or creating multiple posts. The 50-photo history
+limit still applies. Older stored entries without `sent_at` are not assigned guessed
+dates: they remain available through plain and counted commands but not time filters.
+
+In groups, all delivered human photo messages are saved silently, without requiring a
+mention in their captions. Mention the bot in the assembly command. Telegram must let
+the bot receive ordinary group messages (bot admin or Privacy Mode disabled). The bot
+cannot reconstruct previously ignored messages through this polling workflow: resend
+missed photos after upgrading. Protected photos and messages from bots are not collected.
+Photo history is separate from the existing video history.
 
 ### Tests
 
