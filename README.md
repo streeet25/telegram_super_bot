@@ -10,6 +10,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 - Downloads Instagram videos with `yt-dlp`.
 - Combines 2–10 supported video links from one message into one Telegram media-group post.
 - Re-sends a post assembled from the most recently sent videos in the chat.
+- Collects user-uploaded photos and assembles forwardable photo albums on request, preserving order and captions.
 - Downloads YouTube Shorts videos with `yt-dlp`.
 - Normalizes downloaded videos for Telegram-friendly MP4 playback.
 - Captures tweet screenshots through the Python Playwright helper in `scripts/tweet_screenshot.py`.
@@ -65,7 +66,7 @@ ruby bot.rb
 
 Production deployment details are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-The bot stores runtime state in `user_locations.json`, `user_languages.json`, and `reminders.json`. These files are ignored by Git because they contain chat/user state.
+The bot stores runtime state in `user_locations.json`, `user_languages.json`, `reminders.json`, `media_history.json`, and `photo_history.json`. These files are ignored by Git because they contain chat/user state.
 
 ## Project Layout
 
@@ -75,6 +76,7 @@ The bot stores runtime state in `user_locations.json`, `user_languages.json`, an
 - `lib/telegram_instwitter_bot/onboarding.rb` handles `/start`, language selection, and help text.
 - `lib/telegram_instwitter_bot/time_locations.rb` handles user locations and time conversion.
 - `lib/telegram_instwitter_bot/media_jobs.rb` owns queue workers and Telegram media sending.
+- `lib/telegram_instwitter_bot/photo_posts.rb` stores incoming photo file IDs and assembles photo posts, isolated by chat, sender, and forum topic.
 - `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, `instagram.rb`, and `youtube_shorts.rb` handle media lookup/download helpers.
 - `lib/telegram_instwitter_bot/spotify_youtube.rb` resolves Spotify tracks to YouTube video links.
 
@@ -95,9 +97,49 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `фото ночной <tweet>` / `photo dark <tweet>` | Sends a tweet screenshot/photo in dark mode. | `@bot_username photo dark https://x.com/user/status/123` |
 | 2–10 Twitter/X, Instagram, or YouTube Shorts links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://www.youtube.com/shorts/...` |
 | `собери пост из последних 3 видео` | Re-sends the last 2–10 videos previously sent by the bot in this chat as one post. | `@bot_username собери пост из последних 3 видео` |
+| `собери пост` / `assemble post` / `/post` | Sends your new uploaded photos as one forwardable album (2–10 photos), or one standalone photo. | Send photos, then send `собери пост` separately. |
+| `собери пост из последних 3 фото` / `assemble post from last 3 photos` | Selects the last 1–10 photos sent by you in this chat/topic. | `собери пост из последних 3 фото` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
 Plain Twitter/X, Instagram, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+
+### Photo posts
+
+Send images **as photos**, not documents, in private chat (individually, forwarded,
+or as albums), then send `собери пост`. The bot reuses Telegram file IDs without
+downloading the photos. Captions and caption formatting are preserved; no generated
+caption is added. Telegram represents an album as grouped messages, not a merged image.
+Select the whole album when forwarding it.
+
+The plain command uses only photos not yet successfully assembled. An explicit
+`собери пост из последних 3 фото` can also reuse earlier photos. If more than 10 new
+photos are waiting, the bot asks for an explicit count; unselected photos remain
+pending. A failed send does not clear the selection. Incoming photos after a command
+are kept for the next post, even while the first post waits in the media queue.
+Up to 50 photos are remembered per chat/sender/topic, across restarts. Older assembled
+entries are trimmed first; if all 50 are pending, new photos are refused with a notice.
+
+In groups, address the bot in each photo's caption or reply to the bot. Further photos
+of a recognized album are accepted for the same sender and topic. Group privacy settings
+must let the bot receive the photos; private chat is the simplest workflow. Protected
+photos are not collected. Photo history is separate from the existing video history.
+
+### Tests
+
+Run the offline photo workflow tests (standard Ruby libraries only):
+
+```sh
+ruby test/photo_posts_test.rb
+```
+
+With the application's gems installed, also run the Telegram compatibility test:
+
+```sh
+bundle exec ruby test/photo_posts_telegram_smoke.rb
+```
+
+It uses real Telegram message types and a stubbed HTTP adapter, with no network
+requests or messages to real chats.
 
 ## Environment Variables
 

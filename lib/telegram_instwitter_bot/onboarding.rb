@@ -143,6 +143,13 @@ def onboarding_instructions(language, bot_username)
       Command: assemble post from last 3 videos
       What it does: creates one post from the most recent 2–10 videos previously sent by the bot in this chat.
 
+      Photos: send photos in private chat, one by one or as albums. Then send a separate command:
+      Command: assemble post (or /post)
+      What it does: combines your new photos into a forwardable album (up to 10). One photo is sent on its own.
+      Command: assemble post from last 3 photos
+      What it does: selects your last 3 photos in this chat. Captions and order are preserved. Successfully assembled photos are not included in the next plain "assemble post".
+      Send images as photos, not files. In groups, mention the bot in the photo caption or reply to its message; it must be able to receive those photos.
+
       Command: Spotify track link
       What it does: finds a matching YouTube link.
       Example: https://open.spotify.com/track/...
@@ -192,6 +199,13 @@ def onboarding_instructions(language, bot_username)
 
       Команда: собери пост из последних 3 видео
       Что делает: создает один пост из последних 2–10 видео, которые бот ранее отправил в этот чат.
+
+      Фото: пришли в личку фотографии по одной или альбомами. Затем отдельным сообщением:
+      Команда: собери пост (или /post)
+      Что делает: собирает твои новые фото в альбом для пересылки (до 10). Одно фото отправляет отдельно.
+      Команда: собери пост из последних 3 фото
+      Что делает: выбирает последние 3 твоих фото в этом чате. Порядок и подписи сохраняются. Уже собранные фото не попадают в следующую команду «собери пост» без числа.
+      Присылай изображения как фото, не файлом. В группе упомяни бота в подписи к фото или ответь на его сообщение; бот должен видеть эти фотографии.
 
       Команда: ссылка на Spotify-трек
       Что делает: находит подходящую YouTube-ссылку.

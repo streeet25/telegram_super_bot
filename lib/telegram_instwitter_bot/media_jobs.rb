@@ -246,6 +246,8 @@ def process_media_job(bot, job)
     process_video_link_batch(bot, chat_id, job.fetch(:items))
   when :recent_video_post
     send_recent_videos_as_post(bot, chat_id, job.fetch(:count))
+  when :photo_post
+    send_photo_post(bot, job)
   else
     puts "Unknown media job type: #{job[:type]}"
   end

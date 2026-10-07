@@ -6,7 +6,7 @@
 STDOUT.sync = true
 STDERR.sync = true
 
-%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs onboarding].each do |file|
+%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs photo_posts onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
 
@@ -54,7 +54,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
 
       text = message.text || message.caption || ""
       chat_id = message.chat.id
-      user_id = message.from&.id.to_s if message.from
+      user_id = message.from&.id&.to_s
       user_language = user_id ? get_user_language(user_id) : DEFAULT_ONBOARDING_LANGUAGE
       private_chat = private_chat?(message)
 
@@ -84,6 +84,11 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         send_onboarding_instructions(bot, chat_id, user_language, bot_username)
         next
       end
+
+      next if handle_photo_post_message(
+        bot, media_queue, message, command_text,
+        addressed: is_bot_addressed, bot_username: bot_username
+      )
 
       # Handle reminder commands.
       if is_bot_addressed
