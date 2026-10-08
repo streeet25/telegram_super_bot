@@ -85,8 +85,14 @@ class VideoFeed
         next :private if privacy_version && privacy_version != current_version
         next :private if private_chat && data['preferences'][submitter] != 'on'
       end
-      next :duplicate if duplicate?(data, keys) || data['jobs'].any? do |job|
+      next :duplicate if deduplicate!(data, keys, remember: !waiting)
+      waiting_duplicate = data['jobs'].find do |job|
         job['status'] == 'awaiting_consent' && job['consent_request'] == consent_request && !(job['keys'] & keys).empty?
+      end
+      if waiting_duplicate
+        waiting_duplicate['keys'] |= keys
+        data['duplicates_skipped'] = data.fetch('duplicates_skipped', 0) + 1
+        next :duplicate
       end
       next :full if data['jobs'].count { |job| %w[queued sending awaiting_consent].include?(job['status']) } >= 1000
 
@@ -133,7 +139,7 @@ class VideoFeed
           job['status'] = if data['banned'].include?(submitter)
                             'blocked'
                           elsif enabled && consent_request && job['consent_request'] == consent_request
-                            duplicate?(data, job['keys']) ? 'duplicate' : 'queued'
+                            deduplicate!(data, job['keys']) ? 'duplicate' : 'queued'
                           else
                             cancelled += 1
                             'opted_out'
@@ -155,7 +161,7 @@ class VideoFeed
   def stats
     @mutex.synchronize do
       counts = @data['jobs'].group_by { |job| job['status'] }.transform_values(&:size)
-      counts.merge('banned' => @data['banned'].size)
+      counts.merge('banned' => @data['banned'].size, 'duplicates_skipped' => @data.fetch('duplicates_skipped', 0))
     end
   end
 
@@ -241,12 +247,20 @@ class VideoFeed
           item['status'] == 'queued' && item['next_at'] <= @clock.call && !data['banned'].include?(item['submitter']) && data['preferences'][item['submitter']] != 'off'
         end
         if selected
+          if selected['status'] == 'queued' && deduplicate!(data, selected['keys'], candidate: selected)
+            selected['status'] = 'duplicate'
+            next selected.dup
+          end
           selected['status'] = selected['status'] == 'delete_pending' ? 'deleting' : 'sending'
           selected['attempts'] += 1
           selected.dup
         end
       end
       return false unless job
+      if job['status'] == 'duplicate'
+        puts 'Video feed delivery: duplicate skipped'
+        return true
+      end
 
       deleting = job['status'] == 'deleting'
       begin
@@ -270,10 +284,26 @@ class VideoFeed
 
   private
 
-  def duplicate?(data, keys)
-    data['jobs'].any? do |job|
-      !%w[blocked opted_out awaiting_consent duplicate].include?(job['status']) && !(job['keys'] & keys).empty?
+  # Keep every known alias, not just the first URL/file ID. A later upload may
+  # use a known alternative URL while receiving a new hash or Telegram ID.
+  # Pending private submissions must not enrich a public record before consent.
+  def deduplicate!(data, keys, remember: true, candidate: nil)
+    candidate_index = data['jobs'].index(candidate) if candidate
+    matches = data['jobs'].each_with_index.map do |job, index|
+      next if %w[blocked opted_out awaiting_consent duplicate].include?(job['status'])
+      next if candidate && (job['id'] == candidate['id'] || (job['status'] == 'queued' && index > candidate_index))
+      next if (job['keys'] & keys).empty?
+
+      job
+    end.compact
+    return false if matches.empty?
+
+    if remember
+      aliases = (keys + matches.flat_map { |job| job['keys'] }).uniq
+      matches.each { |job| job['keys'] = aliases.dup }
     end
+    data['duplicates_skipped'] = data.fetch('duplicates_skipped', 0) + 1
+    true
   end
 
   def change
@@ -528,6 +558,7 @@ def handle_video_feed_command(bot, message, text)
                counts = feed.stats
                "Лента @#{feed.username}\nВ очереди: #{counts.fetch('queued', 0)}; опубликовано: #{counts.fetch('sent', 0)}; заблокировано отправителей: #{counts['banned']}.\n" \
                  "Ожидают согласия: #{counts.fetch('awaiting_consent', 0)}.\n" \
+                 "Повторов отсеяно: #{counts['duplicates_skipped']}.\n" \
                  "Ошибок публикации: #{counts.fetch('failed', 0)}; неопределённых отправок: #{counts.fetch('uncertain', 0)}.\n" \
                  "Удалено: #{counts.fetch('deleted', 0)}; ожидают удаления: #{counts.fetch('delete_pending', 0)}; ошибок удаления: #{counts.fetch('delete_failed', 0)}.\n\n" \
                  "/feed_ban ссылка_на_пост — заблокировать отправителя\n/feed_unban ссылка_на_пост — разблокировать\n/feed_purge ссылка_на_пост — удалить его посты после подтверждения (до 48 часов)\n/feed_retry_failed — повторить отклонённые Telegram публикации\nВсе команды — только здесь, в личке."

@@ -116,6 +116,70 @@ class VideoFeedTest < Minitest::Test
     assert_equal 7, results.count(:duplicate)
   end
 
+  def keyed_enqueue(keys, user: 'user:10')
+    @feed.enqueue(file_id: "file-#{keys.join('-')}", keys: keys, submitter: user)
+  end
+
+  def test_duplicate_remembers_alternative_links_and_file_ids_after_restart
+    assert_equal :queued, keyed_enqueue(%w[url:a sha:1 telegram:1])
+    @feed.process_next
+    assert_equal :duplicate, keyed_enqueue(%w[url:b sha:1 telegram:2], user: 'user:20')
+    @feed = new_feed
+    assert_equal :duplicate, keyed_enqueue(%w[url:b sha:2 telegram:3], user: 'user:30')
+    assert_equal :duplicate, keyed_enqueue(%w[url:c sha:3 telegram:2])
+    refute @feed.process_next
+    assert_equal 1, @api.calls.count { |name, _| name == :send_video }
+  end
+
+  def test_newly_discovered_aliases_are_checked_again_before_publication
+    keyed_enqueue(%w[url:a sha:1])
+    keyed_enqueue(%w[url:b sha:2])
+    assert_equal :duplicate, keyed_enqueue(%w[url:a sha:2])
+    3.times { @feed.process_next }
+    assert_equal 1, @api.calls.count { |name, _| name == :send_video }
+    assert_equal 1, @feed.stats['duplicate']
+    assert_equal 2, @feed.stats['duplicates_skipped']
+    assert_equal 2, new_feed.stats['duplicates_skipped']
+  end
+
+  def test_distinct_videos_are_not_suppressed
+    assert_equal :queued, keyed_enqueue(%w[url:a sha:1 telegram:1])
+    assert_equal :queued, keyed_enqueue(%w[url:b sha:2 telegram:2])
+    2.times { @feed.process_next }
+    assert_equal 2, @api.calls.count { |name, _| name == :send_video }
+    assert_equal 0, @feed.stats['duplicates_skipped']
+  end
+
+  def test_consent_promotion_remembers_new_aliases_of_a_published_video
+    context = first_submission
+    assert_equal :awaiting_consent, @feed.enqueue(file_id: 'private', keys: %w[url:b sha:1], **context)
+    keyed_enqueue(%w[url:a sha:1], user: 'user:20')
+    @feed.process_next
+    consent(context)
+    assert_equal :duplicate, keyed_enqueue(%w[url:b sha:2])
+    refute @feed.process_next
+  end
+
+  def test_unapproved_private_keys_do_not_enrich_public_records
+    keyed_enqueue(%w[url:a sha:1], user: 'user:20')
+    @feed.process_next
+    context = first_submission
+    assert_equal :duplicate, @feed.enqueue(file_id: 'private', keys: %w[url:private sha:1], **context)
+    assert_equal :queued, keyed_enqueue(%w[url:private sha:2], user: 'user:30')
+  end
+
+  def test_failed_alias_save_leaves_original_dedup_state_intact
+    keyed_enqueue(%w[url:a sha:1])
+    saved_state = File.read(@file)
+    File.delete(@file)
+    Dir.mkdir(@file)
+    assert_raises(SystemCallError) { keyed_enqueue(%w[url:b sha:1]) }
+    Dir.rmdir(@file)
+    File.write(@file, saved_state)
+    assert_equal :queued, keyed_enqueue(%w[url:b sha:2])
+    assert_equal 0, @feed.stats['duplicates_skipped']
+  end
+
   def test_api_rate_limit_retries_without_losing_job
     enqueue
     @api.error = ApiError.new(429, 'Too Many Requests', 90)

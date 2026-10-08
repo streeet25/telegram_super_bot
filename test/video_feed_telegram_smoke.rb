@@ -130,6 +130,11 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
   now += 20
   @video_feed.process_next
   check(@video_feed.stats['sent'] == 1, 'File-ID video did not publish')
+  duplicate = typed_message(110, video: { file_id: 'alternative-file-id', file_unique_id: 'unique1', width: 640, height: 480, duration: 2 })
+  enqueue_video_feed(duplicate, submitter: 'user:30', keys: [%w[url:alternative sha:alternative]])
+  check(@video_feed.stats['duplicates_skipped'] == 1, 'Actual Telegram unique ID did not suppress a different sender’s duplicate')
+  check(@video_feed.enqueue(file_id: 'new-upload', keys: %w[url:alternative sha:changed], submitter: 'user:40') == :duplicate, 'Alternative URL was not remembered')
+  check(!@video_feed.process_next, 'Duplicate triggered another channel send')
   handle_video_feed_command(bot, sent, '/feed_ban https://t.me/pobo4ka_ink/101')
   check(@video_feed.stats['banned'] == 1, 'Actual owner type failed moderation authorization')
   handle_video_feed_command(bot, sent, '/feed_purge https://t.me/pobo4ka_ink/101')

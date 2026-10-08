@@ -162,7 +162,16 @@ The private `video_feed.json` file (mode `0600`) atomically persists file IDs,
 hashed canonical URLs/content digests, submitter IDs for moderation, preferences,
 bans, retries and channel message IDs. No names, source captions or downloaded
 videos are stored. Deduplication covers queued/published/deleted items by URL,
-content hash or Telegram unique ID, including across restarts. The worker has
+content hash or Telegram unique ID, including across restarts. Confirmed duplicates
+contribute their alternative URLs/hashes/Telegram IDs to the existing record, so
+subsequent uploads through any known alias are suppressed too. The publisher
+rechecks duplicates before sending, including aliases discovered after enqueue.
+`/feed` reports the persistent number of skipped duplicate submissions (counted
+since the alias-dedup release). Private submissions without consent do not add
+new aliases to public records. Different re-encodes, crops or watermarks cannot
+be guaranteed to match without a shared known URL/hash/ID; this is exact identity
+deduplication, not visual similarity matching. Original replies to the submitting
+user/chat are unchanged; only the public feed is deduplicated. The worker has
 its own HTTP connection, bounded timeouts and a two-second interval; at most
 1,000 publications may wait. Queue overflow logs `Video feed enqueue: full`
 and does not affect the original download. Explicit 429/5xx rejections retry

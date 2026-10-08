@@ -8,7 +8,7 @@ The production bot runs on `root@5.61.91.77` in the Docker container
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The first-video consent fix validated on 2026-10-08 is `videomorph:first-consent-20261008` (`sha256:d2db97d32a6119ecd1995b4230f088411f12dc5fa184dde7e62d022b2a47d48e`). The previous image `videomorph:pobochka-20261008` (`sha256:dfe1858855eddeee301989feb1544826d3c8e1bc10c286254f6db8cf1fac4402`) is retained for rollback.
+- The launcher pins the Docker image by digest. The deduplication release validated on 2026-10-08 is `videomorph:dedup-20261008` (`sha256:913eeb1242b2acd0e0c2189046e2ffa6e6f92a14842e9926d1a4c0df9f0b3809`). The previous image `videomorph:first-consent-20261008` (`sha256:d2db97d32a6119ecd1995b4230f088411f12dc5fa184dde7e62d022b2a47d48e`) is retained for rollback.
 
 Use `systemctl restart videomorph.service` to restart production. Do not manage the
 container lifecycle directly: the launcher uses `docker run --rm`, and systemd
@@ -31,6 +31,11 @@ reset it on restart. The startup line `Video feed enabled:` confirms initializat
 Do not call `getUpdates` alongside production, and do not seed the feed from old
 media history. Validate serialization with offline smoke tests; channel rights
 can be checked read-only. Changes to the public channel need scoped authorization.
+
+Deduplication aliases and the `duplicates_skipped` counter live in `video_feed.json`.
+Keep the existing file on rollout: its published-video keys are the baseline for
+future duplicate suppression. The publisher rechecks queued items against known
+aliases immediately before sending. This update does not delete existing posts.
 
 First-link consent requests are stored in the same state file and include a
 submitter-bound token with a 24-hour expiry. Successfully delivered initial
