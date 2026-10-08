@@ -6,7 +6,7 @@
 STDOUT.sync = true
 STDERR.sync = true
 
-%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs photo_posts onboarding].each do |file|
+%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs photo_posts video_feed onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
 
@@ -17,6 +17,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
   bot_info = bot.api.get_me
   bot_username = bot_info.respond_to?(:username) ? bot_info.username : nil
   puts "Bot username: @#{bot_username}" if bot_username
+  start_video_feed(bot)
 
   if DROP_PENDING_UPDATES_ON_START
     begin
@@ -46,6 +47,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
   bot.listen do |message|
     begin
       if message.is_a?(Telegram::Bot::Types::CallbackQuery)
+        next if handle_video_feed_privacy_callback(bot, message)
         next if handle_language_callback(bot, message, bot_username)
         next
       end
@@ -62,6 +64,8 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       is_bot_mentioned = bot_username && text.include?("@#{bot_username}")
       is_bot_addressed = private_chat || is_bot_mentioned
       command_text = is_bot_mentioned ? text.gsub("@#{bot_username}", "").strip : text.strip
+      next if handle_video_feed_privacy_command(bot, message, text)
+      next if handle_video_feed_command(bot, message, text)
       if onboarding_command?(text)
         command = text.strip.split(/\s+/, 2).first
         puts "Onboarding command received: command=#{command.inspect} chat_id=#{chat_id} " \
@@ -71,6 +75,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       if bot_command?(text, %w[start], bot_username: bot_username, private_chat: true)
         if private_chat
           send_language_selection(bot, chat_id, bot_username)
+          send_video_feed_privacy(bot, chat_id, user_id)
         else
           bot.api.send_message(
             chat_id: chat_id,
@@ -232,7 +237,15 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         if received_link_count > video_link_items.size
           safe_send_message(bot, chat_id, "В одном посте обрабатываю первые #{MAX_MEDIA_LINKS_PER_MESSAGE} видео-ссылок.")
         end
-        enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items })
+        submitter = video_feed_submitter(message) if video_feed
+        # First-time private submissions stay private, even if consent is given
+        # while the download is running. The setting applies to future requests.
+        if submitter && private_chat && video_feed.preference(submitter) != 'on'
+          send_video_feed_privacy(bot, chat_id, user_id) if video_feed.preference(submitter).nil?
+          submitter = nil
+        end
+        feed_context = submitter ? { submitter: submitter, private_chat: private_chat, privacy_version: video_feed.privacy_version(submitter) } : nil
+        enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items, feed_context: feed_context })
         next
       end
 

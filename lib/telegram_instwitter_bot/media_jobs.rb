@@ -92,7 +92,7 @@ def recent_sent_videos(chat_id, count)
   MEDIA_HISTORY_MUTEX.synchronize { Array(load_media_history[chat_id.to_s]).last(count) }
 end
 
-def send_video_file(bot, chat_id, video_path, caption, source_name)
+def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context: nil, source_link: nil)
   return unless video_path && File.exist?(video_path)
 
   file_size_mb = (File.size(video_path).to_f / 1024 / 1024).round(1)
@@ -104,8 +104,10 @@ def send_video_file(bot, chat_id, video_path, caption, source_name)
     supports_streaming: true
   }.merge(metadata)
 
+  feed_keys = feed_context ? video_feed_keys(source_link, video_path) : []
   response = bot.api.send_video(**params)
   record_sent_videos(chat_id, response, sources: [source_name])
+  enqueue_video_feed(response, **feed_context, keys: [feed_keys]) if feed_context
   message_id = response.respond_to?(:message_id) ? response.message_id : nil
   details = [
     "source=#{source_name}",
@@ -133,7 +135,7 @@ def video_media_payload(media, caption: nil, metadata: {})
   end
 end
 
-def send_video_album(bot, chat_id, videos, caption: "")
+def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
   uploads = {}
   media = videos.each_with_index.map do |video, index|
     attachment_name = "video_#{index}"
@@ -144,8 +146,10 @@ def send_video_album(bot, chat_id, videos, caption: "")
       metadata: video.fetch(:metadata, {})
     )
   end
+  feed_keys = feed_context ? videos.map { |video| video_feed_keys(video[:link], video[:path]) } : []
   response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media), **uploads)
   record_sent_videos(chat_id, response, sources: videos.map { |video| video[:source] })
+  enqueue_video_feed(response, **feed_context, keys: feed_keys) if feed_context
   response
 rescue => e
   puts "Ошибка отправки альбома: #{e.class}: #{e.message}"
@@ -163,10 +167,10 @@ def download_video_item(item)
          end
   return nil unless path
 
-  { path: path, source: item.fetch(:source).to_s, metadata: video_upload_metadata(path) }
+  { path: path, source: item.fetch(:source).to_s, link: item.fetch(:link), metadata: video_upload_metadata(path) }
 end
 
-def process_video_link_batch(bot, chat_id, items)
+def process_video_link_batch(bot, chat_id, items, feed_context: nil)
   downloaded = items.each_with_object([]) do |item, result|
     video = download_video_item(item)
     result << video if video
@@ -183,9 +187,9 @@ def process_video_link_batch(bot, chat_id, items)
 
   if downloaded.one?
     video = downloaded.first
-    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source])
+    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: feed_context, source_link: video[:link])
   else
-    send_video_album(bot, chat_id, downloaded, caption: "Подборка из #{downloaded.size} видео")
+    send_video_album(bot, chat_id, downloaded, caption: "Подборка из #{downloaded.size} видео", feed_context: feed_context)
   end
 end
 
@@ -233,17 +237,17 @@ def process_media_job(bot, job)
     send_photo_file(bot, chat_id, screenshot_path, caption, "Twitter фото")
   when :twitter_video
     video_path = download_twitter_video(link)
-    send_video_file(bot, chat_id, video_path, "Видео из Twitter", "Twitter")
+    send_video_file(bot, chat_id, video_path, "Видео из Twitter", "Twitter", feed_context: job[:feed_context], source_link: link)
   when :instagram_video
     video_path = download_instagram_video(link)
-    send_video_file(bot, chat_id, video_path, "Видео из Instagram", "Instagram")
+    send_video_file(bot, chat_id, video_path, "Видео из Instagram", "Instagram", feed_context: job[:feed_context], source_link: link)
   when :youtube_shorts_video
     video_path = download_youtube_shorts_video(link)
-    send_video_file(bot, chat_id, video_path, "Видео из YouTube Shorts", "YouTube Shorts")
+    send_video_file(bot, chat_id, video_path, "Видео из YouTube Shorts", "YouTube Shorts", feed_context: job[:feed_context], source_link: link)
   when :spotify_youtube
     safe_send_message(bot, chat_id, spotify_youtube_message(link))
   when :video_link_batch
-    process_video_link_batch(bot, chat_id, job.fetch(:items))
+    process_video_link_batch(bot, chat_id, job.fetch(:items), feed_context: job[:feed_context])
   when :recent_video_post
     send_recent_videos_as_post(bot, chat_id, job.fetch(:count))
   when :photo_post

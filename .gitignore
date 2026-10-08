@@ -12,6 +12,7 @@ user_languages.json
 reminders.json
 media_history.json
 photo_history.json
+video_feed.json
 *.log
 
 # Bundler and Ruby tooling

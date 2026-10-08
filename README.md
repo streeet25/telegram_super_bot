@@ -20,6 +20,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 - Stores per-user onboarding language preferences.
 - Creates reminders from chat commands.
 - Limits media download duration, size, queue length, and worker count through environment variables.
+- Optionally publishes successfully delivered link downloads into an anonymous public video feed, with persistent deduplication, privacy controls and administrator moderation.
 
 ## Requirements
 
@@ -66,7 +67,7 @@ ruby bot.rb
 
 Production deployment details are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-The bot stores runtime state in `user_locations.json`, `user_languages.json`, `reminders.json`, `media_history.json`, and `photo_history.json`. These files are ignored by Git because they contain chat/user state.
+The bot stores runtime state in `user_locations.json`, `user_languages.json`, `reminders.json`, `media_history.json`, `photo_history.json`, and `video_feed.json`. These files are ignored by Git because they contain chat/user state.
 
 ## Project Layout
 
@@ -77,6 +78,7 @@ The bot stores runtime state in `user_locations.json`, `user_languages.json`, `r
 - `lib/telegram_instwitter_bot/time_locations.rb` handles user locations and time conversion.
 - `lib/telegram_instwitter_bot/media_jobs.rb` owns queue workers and Telegram media sending.
 - `lib/telegram_instwitter_bot/photo_posts.rb` stores incoming photo file IDs and assembles photo posts, isolated by chat, sender, and forum topic.
+- `lib/telegram_instwitter_bot/video_feed.rb` owns the persistent feed queue, deduplication, privacy preferences and moderation.
 - `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, `instagram.rb`, and `youtube_shorts.rb` handle media lookup/download helpers.
 - `lib/telegram_instwitter_bot/spotify_youtube.rb` resolves Spotify tracks to YouTube video links.
 
@@ -104,6 +106,72 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
 Plain Twitter/X, Instagram, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+
+### Anonymous video feed (ПОБОЧКА)
+
+Set `VIDEO_FEED_CHANNEL=@pobo4ka_ink` to enable; leave empty to disable. The bot
+must be a channel administrator with publish and delete rights. The destination
+is resolved to its numeric ID and bound to the state file; changing it without
+migrating state fails closed. Successfully downloaded and delivered videos from
+supported links are published individually using Telegram file IDs, without
+forwarding attribution, captions, submitter names or source-chat titles. Video
+pixels/audio/watermarks are unchanged. Uploaded photos/videos, Spotify links,
+screenshots and reassembled history are not feed submissions. Old history is not
+backfilled. Protected content, bots, automatic discussion forwards and the feed
+channel itself are excluded.
+
+Group submissions participate by default. In private chat, `/start`, `/privacy`,
+or the first link shows an inline choice. Private submissions are excluded until
+the person opts in. The initial link stays private; consent applies to future
+requests. **Не публиковать в Побочке** disables all of that person's future
+submissions, including groups, and cancels unpublished queued/failed items. The
+setting persists until **Публиковать анонимно** is selected. Cancelled items and
+old history are never automatically replayed. Existing posts remain in the
+channel. Anonymous `sender_chat` submissions are excluded because they cannot be
+matched to an individual's privacy preferences or moderation record. Changing
+privacy settings also invalidates feed eligibility of downloads already in progress.
+
+Moderation commands work only in private chat. Each command rechecks that the
+caller is the channel owner or an administrator with delete permission:
+
+- `/feed` — queue/error counts and command help (never submitter identities).
+- `/feed_ban https://t.me/pobo4ka_ink/123` — block the original submitter of that
+  feed post, including pending jobs. Normal bot downloads still work.
+- `/feed_unban https://t.me/pobo4ka_ink/123` — allow new submissions again;
+  does not revive blocked jobs or override the person's privacy setting.
+- `/feed_purge https://t.me/pobo4ka_ink/123` — preview deletion of that blocked
+  submitter's published posts; returns a one-use `/feed_confirm TOKEN` command,
+  bound to the requesting administrator and valid for five minutes. This is a
+  separate destructive operation, never implicit in banning.
+- `/feed_retry_failed` — retry explicitly rejected publications; ambiguous
+  sends are excluded to avoid duplicates.
+
+Telegram bots can only delete posts younger than 48 hours; older ones need manual
+channel moderation ([Bot API](https://core.telegram.org/bots/api#deletemessage)).
+Deletion failures and remaining jobs are reported in `/feed`.
+
+The private `video_feed.json` file (mode `0600`) atomically persists file IDs,
+hashed canonical URLs/content digests, submitter IDs for moderation, preferences,
+bans, retries and channel message IDs. No names, source captions or downloaded
+videos are stored. Deduplication covers queued/published/deleted items by URL,
+content hash or Telegram unique ID, including across restarts. The worker has
+its own HTTP connection, bounded timeouts and a two-second interval; at most
+1,000 publications may wait. Queue overflow logs `Video feed enqueue: full`
+and does not affect the original download. Explicit 429/5xx rejections retry
+with backoff up to eight attempts. Unknown transport outcomes and interrupted
+sends become `uncertain` and are not automatically resent: Telegram provides no
+idempotency key. Review the channel and state manually to resolve them. Corrupt
+state disables the feed without discarding deduplication or bans. Keep this file
+private, backed up and out of Git and container images.
+
+Tests (the smoke scripts use a network-disabled Faraday test adapter):
+
+```sh
+ruby test/video_feed_test.rb
+bundle exec ruby test/video_feed_telegram_smoke.rb
+ruby test/photo_posts_test.rb
+bundle exec ruby test/photo_posts_telegram_smoke.rb
+```
 
 ### Photo posts
 

@@ -106,6 +106,8 @@ def onboarding_instructions(language, bot_username)
       In group chats, mention the bot before commands: #{bot_mention}
       Group example: #{bot_mention} time 21:00
 
+      Public video feed: if enabled, successfully downloaded videos from groups can appear anonymously in the shared channel. Private-chat videos require your consent first. /privacy in private chat lets you disable all your future publications, including group submissions and queued videos, until you enable them again. Already published posts are not removed. Names and source chat titles are omitted; the video itself is not anonymized.
+
       Commands:
 
       Command: I am in Belgium
@@ -164,6 +166,8 @@ def onboarding_instructions(language, bot_username)
       В личке можно просто отправить ссылку на Twitter/X, Instagram, YouTube Shorts или Spotify.
       В групповых чатах перед командами упоминайте бота: #{bot_mention}
       Пример для группы: #{bot_mention} время 21:00
+
+      Общая видеолента: если она включена, успешно скачанные видео из групп могут анонимно попадать в канал. Для видео из лички сначала нужно твоё согласие. Команда /privacy в личке позволяет отключить все свои публикации, включая видео из групп и ожидающую очередь, пока сам не включишь обратно. Уже опубликованные посты не удаляются. Имя и название чата не показываются; само содержимое видео не скрывается.
 
       Команды:
 
