@@ -115,12 +115,15 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
   now = Time.now.to_i
   @video_feed = VideoFeed.new(path: File.join(dir, 'feed.json'), api: api, channel_id: -10042, username: 'pobo4ka_ink', clock: -> { now })
   sent = typed_message(100, caption: 'Private caption', video: { file_id: 'file1', file_unique_id: 'unique1', width: 640, height: 480, duration: 2 })
-  enqueue_video_feed(sent, submitter: 'user:10', private_chat: true, keys: [%w[sha:one]])
+  context = prepare_video_feed_submission(bot, typed_message(99, text: 'https://x.com/test/status/100'))
+  check(context[:consent_request], 'Initial private submission has no consent token')
+  enqueue_video_feed(sent, **context, keys: [%w[sha:one]])
   check(!@video_feed.process_next, 'Private video leaked before consent')
-  send_video_feed_privacy(bot, 10, 10)
-  callback = Telegram::Bot::Types::CallbackQuery.new(id: 'c1', chat_instance: 'test', from: sent.from, message: sent, data: 'feed_privacy:on')
+  check(@video_feed.stats['awaiting_consent'] == 1, 'First video was discarded instead of waiting for consent')
+  callback_data = JSON.parse(requests.last[1].fetch('reply_markup'))['inline_keyboard'][1][0]['callback_data']
+  callback = Telegram::Bot::Types::CallbackQuery.new(id: 'c1', chat_instance: 'test', from: sent.from, message: sent, data: callback_data)
   check(handle_video_feed_privacy_callback(bot, callback), 'Consent callback not handled')
-  enqueue_video_feed(sent, submitter: 'user:10', private_chat: true, keys: [%w[sha:one]])
+  check(@video_feed.stats['queued'] == 1, 'First video did not enter queue when consent was accepted')
   fail_next = true
   @video_feed.process_next
   check(@video_feed.stats['queued'] == 1, 'Actual Telegram ResponseError was not classified as retryable')

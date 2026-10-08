@@ -421,4 +421,164 @@ class VideoFeedTest < Minitest::Test
     assert_equal :queued, enqueue('new', 'user:10', privacy_version: @feed.privacy_version('user:10'))
     assert_equal @feed.privacy_version('user:10'), new_feed.privacy_version('user:10')
   end
+
+  def first_submission
+    prepare_video_feed_submission(@bot, build_message('https://x.com/test/status/1'))
+  end
+
+  def complete_download(context, id = 'first')
+    @feed.enqueue(file_id: "file-#{id}", keys: ["key-#{id}"], **context)
+  end
+
+  def consent(context)
+    @feed.set_preference(context[:submitter], enabled: true, consent_request: context[:consent_request])
+  end
+
+  def test_first_video_waits_until_the_associated_consent_is_received
+    context = first_submission
+    assert_equal :awaiting_consent, complete_download(context)
+    refute @feed.process_next
+    keyboard = JSON.parse(@api.calls.last[1][:reply_markup])
+    callback_data = keyboard['inline_keyboard'][1][0]['callback_data']
+    assert_equal "feed_privacy:on:#{context[:consent_request]}", callback_data
+    assert_operator callback_data.bytesize, :<=, 64
+    msg = build_message('')
+    callback = OpenStruct.new(id: 'first', data: callback_data, message: msg, from: msg.from)
+    assert handle_video_feed_privacy_callback(@bot, callback)
+    assert_equal 1, @feed.stats['queued']
+    assert @feed.process_next
+    assert_equal 1, @feed.stats['sent']
+    assert handle_video_feed_privacy_callback(@bot, callback)
+    refute @feed.process_next
+  end
+
+  def test_consent_before_download_finishes_includes_that_video
+    context = first_submission
+    consent(context)
+    assert_equal :queued, complete_download(context)
+    @feed.process_next
+    assert_equal 1, @feed.stats['sent']
+  end
+
+  def test_waiting_video_and_consent_request_survive_restart
+    context = first_submission
+    complete_download(context)
+    @feed = new_feed
+    refute @feed.process_next
+    consent(context)
+    @feed.process_next
+    assert_equal 1, @feed.stats['sent']
+  end
+
+  def test_approved_request_survives_restart_before_download_completes
+    context = first_submission
+    consent(context)
+    @feed = new_feed
+    assert_equal :queued, complete_download(context)
+  end
+
+  def test_opt_out_revokes_waiting_and_inflight_consent_requests
+    waiting = first_submission
+    downloading = first_submission
+    complete_download(waiting)
+    assert_equal 1, @feed.set_preference('user:10', enabled: false)
+    @feed.set_preference('user:10', enabled: true)
+    assert_raises(VideoFeedError) { consent(waiting) }
+    assert_raises(VideoFeedError) { consent(downloading) }
+    assert_equal :private, complete_download(downloading, 'later')
+    refute @feed.process_next
+  end
+
+  def test_opt_out_after_early_consent_revokes_inflight_download
+    context = first_submission
+    consent(context)
+    @feed.set_preference('user:10', enabled: false)
+    @feed.set_preference('user:10', enabled: true)
+    assert_equal :private, complete_download(context)
+  end
+
+  def test_only_the_selected_message_is_released_not_other_private_history
+    first, second = first_submission, first_submission
+    complete_download(first, 'one')
+    complete_download(second, 'two')
+    consent(second)
+    assert_equal 1, @feed.stats['queued']
+    assert_equal 1, @feed.stats['opted_out']
+    @feed.process_next
+    assert_equal 'file-two', @api.calls.last[1][:video]
+    refute @feed.process_next
+  end
+
+  def test_all_videos_in_consented_message_are_released_without_duplicates
+    context = first_submission
+    assert_equal :awaiting_consent, complete_download(context, 'one')
+    assert_equal :awaiting_consent, complete_download(context, 'two')
+    assert_equal :duplicate, complete_download(context, 'two')
+    consent(context)
+    consent(context)
+    assert_equal 2, @feed.stats['queued']
+  end
+
+  def test_waiting_private_video_does_not_reserve_global_deduplication
+    context = first_submission
+    complete_download(context)
+    assert_equal :queued, enqueue('first', 'user:20')
+    @feed.process_next
+    consent(context)
+    assert_equal 1, @feed.stats['duplicate']
+    refute @feed.process_next
+  end
+
+  def test_expired_request_cannot_enable_publication_or_retain_private_video
+    context = first_submission
+    complete_download(context)
+    @now += 24 * 3600
+    refute @feed.process_next
+    assert_nil @feed.stats['awaiting_consent']
+    assert_raises(VideoFeedError) { consent(context) }
+    assert_nil @feed.preference('user:10')
+    assert_equal :private, complete_download(context)
+  end
+
+  def test_consent_token_is_bound_to_its_submitter
+    context = first_submission
+    assert_raises(VideoFeedError) { @feed.set_preference('user:20', enabled: true, consent_request: context[:consent_request]) }
+    assert_nil @feed.preference('user:20')
+    assert_nil @feed.preference('user:10')
+    assert_equal :private, complete_download(context.merge(submitter: 'user:20'))
+  end
+
+  def test_generic_settings_and_old_buttons_do_not_backfill_private_videos
+    context = first_submission
+    complete_download(context)
+    @feed.set_preference('user:10', enabled: true)
+    refute @feed.process_next
+    assert_equal 1, @feed.stats['opted_out']
+  end
+
+  def test_consent_and_download_completion_can_race_safely
+    context = first_submission
+    threads = [Thread.new { consent(context) }, Thread.new { complete_download(context) }]
+    threads.each(&:value)
+    assert_equal 1, @feed.stats['queued']
+    @feed.process_next
+    assert_equal 1, @feed.stats['sent']
+  end
+
+  def test_disabled_users_never_get_held_submissions
+    @feed.set_preference('user:10', enabled: false)
+    assert_nil first_submission
+    assert_empty @api.calls
+  end
+
+  def test_banning_also_revokes_unapproved_submissions
+    enqueue('previous')
+    @feed.process_next
+    context = first_submission
+    complete_download(context)
+    @feed.moderate('ban', 1, actor_id: 42)
+    @feed.moderate('unban', 1, actor_id: 42)
+    assert_raises(VideoFeedError) { consent(context) }
+    refute @feed.process_next
+  end
 end

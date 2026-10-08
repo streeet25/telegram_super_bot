@@ -237,14 +237,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         if received_link_count > video_link_items.size
           safe_send_message(bot, chat_id, "В одном посте обрабатываю первые #{MAX_MEDIA_LINKS_PER_MESSAGE} видео-ссылок.")
         end
-        submitter = video_feed_submitter(message) if video_feed
-        # First-time private submissions stay private, even if consent is given
-        # while the download is running. The setting applies to future requests.
-        if submitter && private_chat && video_feed.preference(submitter) != 'on'
-          send_video_feed_privacy(bot, chat_id, user_id) if video_feed.preference(submitter).nil?
-          submitter = nil
-        end
-        feed_context = submitter ? { submitter: submitter, private_chat: private_chat, privacy_version: video_feed.privacy_version(submitter) } : nil
+        feed_context = prepare_video_feed_submission(bot, message)
         enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items, feed_context: feed_context })
         next
       end

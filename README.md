@@ -122,14 +122,22 @@ channel itself are excluded.
 
 Group submissions participate by default. In private chat, `/start`, `/privacy`,
 or the first link shows an inline choice. Private submissions are excluded until
-the person opts in. The initial link stays private; consent applies to future
-requests. **Не публиковать в Побочке** disables all of that person's future
+the person opts in. Consent on the prompt attached to a new link includes that
+message's successfully delivered videos as well as future requests. It works
+both before and after download completion: file IDs wait in `awaiting_consent`
+and enter the publication queue only after approval. The prompt is bound to its
+submitter and submission, valid for 24 hours, and survives restarts. Expired,
+unapproved file IDs are removed. Consent never releases unrelated older messages;
+generic `/start`/`privacy` buttons and buttons created by older bot versions still
+apply only to future requests. **Не публиковать в Побочке** disables all of that person's future
 submissions, including groups, and cancels unpublished queued/failed items. The
 setting persists until **Публиковать анонимно** is selected. Cancelled items and
 old history are never automatically replayed. Existing posts remain in the
 channel. Anonymous `sender_chat` submissions are excluded because they cannot be
 matched to an individual's privacy preferences or moderation record. Changing
-privacy settings also invalidates feed eligibility of downloads already in progress.
+privacy settings also invalidates feed eligibility of downloads already in progress,
+except the explicitly approved initial submission. Opting out revokes its consent
+token too, so enabling publication again cannot revive that cancelled download.
 
 Moderation commands work only in private chat. Each command rechecks that the
 caller is the channel owner or an administrator with delete permission:

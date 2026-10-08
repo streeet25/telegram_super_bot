@@ -39,22 +39,64 @@ class VideoFeed
     end
   end
 
-  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil)
+  # The token identifies only the submission that displayed the consent prompt.
+  # It survives a restart but cannot revive submissions cancelled by an opt-out.
+  def submission_context(submitter, private_chat:)
+    change do |data|
+      next nil if data['banned'].include?(submitter) || data['preferences'][submitter] == 'off'
+
+      context = { submitter: submitter, private_chat: private_chat,
+                  privacy_version: data['privacy_versions'].fetch(submitter, 0) }
+      if private_chat && data['preferences'][submitter] != 'on'
+        next nil if data['consent_requests'].size >= 1000
+
+        token = SecureRandom.hex(12)
+        data['consent_requests'][token] = {
+          'submitter' => submitter, 'privacy_version' => context[:privacy_version],
+          'expires_at' => @clock.call + 24 * 3600
+        }
+        context[:consent_request] = token
+      end
+      context
+    end
+  end
+
+  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil, consent_request: nil)
     return :ineligible if submitter.to_s.empty? || file_id.to_s.empty? || keys.empty?
 
     change do |data|
       next :banned if data['banned'].include?(submitter)
-      next :private if privacy_version && privacy_version != data['privacy_versions'].fetch(submitter, 0)
-      next :private if data['preferences'][submitter] == 'off' || (private_chat && data['preferences'][submitter] != 'on')
-      next :duplicate if data['jobs'].any? { |job| !%w[blocked opted_out].include?(job['status']) && !(job['keys'] & keys).empty? }
-      next :full if data['jobs'].count { |job| %w[queued sending].include?(job['status']) } >= 1000
+      next :private if data['preferences'][submitter] == 'off'
+
+      current_version = data['privacy_versions'].fetch(submitter, 0)
+      waiting = false
+      if consent_request
+        request = data['consent_requests'][consent_request]
+        next :private unless private_chat && request && request['submitter'] == submitter && request['privacy_version'] == privacy_version
+
+        if request.key?('approved_version')
+          next :private unless request['approved_version'] == current_version && data['preferences'][submitter] == 'on'
+        else
+          next :private unless request['privacy_version'] == current_version && data['preferences'][submitter].nil?
+
+          waiting = true
+        end
+      else
+        next :private if privacy_version && privacy_version != current_version
+        next :private if private_chat && data['preferences'][submitter] != 'on'
+      end
+      next :duplicate if duplicate?(data, keys) || data['jobs'].any? do |job|
+        job['status'] == 'awaiting_consent' && job['consent_request'] == consent_request && !(job['keys'] & keys).empty?
+      end
+      next :full if data['jobs'].count { |job| %w[queued sending awaiting_consent].include?(job['status']) } >= 1000
 
       data['jobs'] << {
         'id' => SecureRandom.hex(12), 'file_id' => file_id, 'keys' => keys.uniq,
-        'submitter' => submitter, 'status' => 'queued', 'attempts' => 0,
+        'submitter' => submitter, 'status' => waiting ? 'awaiting_consent' : 'queued', 'attempts' => 0,
+        'consent_request' => consent_request,
         'created_at' => @clock.call, 'next_at' => 0
       }
-      :queued
+      waiting ? :awaiting_consent : :queued
     end
   end
 
@@ -66,15 +108,37 @@ class VideoFeed
     @mutex.synchronize { @data['privacy_versions'].fetch(submitter, 0) }
   end
 
-  def set_preference(submitter, enabled:)
+  def set_preference(submitter, enabled:, consent_request: nil)
     @publication_gate.synchronize do
       change do |data|
+        request = data['consent_requests'][consent_request] if consent_request
+        if consent_request && (!enabled || !request || request['submitter'] != submitter ||
+           request.fetch('approved_version', request['privacy_version']) != data['privacy_versions'].fetch(submitter, 0))
+          raise VideoFeedError, 'Этот запрос согласия уже не действует. Пришли ссылку ещё раз; настройка не изменена.'
+        end
         choice = enabled ? 'on' : 'off'
-        if data['preferences'][submitter] != choice
+        changed = data['preferences'][submitter] != choice
+        if changed
           data['privacy_versions'][submitter] = data['privacy_versions'].fetch(submitter, 0) + 1
         end
         data['preferences'][submitter] = choice
+        data['consent_requests'].delete_if do |token, item|
+          item['submitter'] == submitter && token != consent_request && (changed || !enabled)
+        end
+        request['approved_version'] = data['privacy_versions'].fetch(submitter, 0) if request
         cancelled = 0
+        data['jobs'].each do |job|
+          next unless job['submitter'] == submitter && job['status'] == 'awaiting_consent'
+
+          job['status'] = if data['banned'].include?(submitter)
+                            'blocked'
+                          elsif enabled && consent_request && job['consent_request'] == consent_request
+                            duplicate?(data, job['keys']) ? 'duplicate' : 'queued'
+                          else
+                            cancelled += 1
+                            'opted_out'
+                          end
+        end
         unless enabled
           data['jobs'].each do |job|
             next unless job['submitter'] == submitter && %w[queued failed].include?(job['status'])
@@ -106,8 +170,9 @@ class VideoFeed
         when 'ban'
           data['banned'] |= [submitter]
           data['jobs'].each do |job|
-            job['status'] = 'blocked' if job['submitter'] == submitter && %w[queued failed].include?(job['status'])
+            job['status'] = 'blocked' if job['submitter'] == submitter && %w[queued failed awaiting_consent].include?(job['status'])
           end
+          data['consent_requests'].delete_if { |_, item| item['submitter'] == submitter }
           'Отправитель заблокирован в ленте. Новые и ожидающие видео публиковаться не будут. Старые посты пока сохранены.'
         when 'unban'
           data['banned'].delete(submitter)
@@ -205,9 +270,19 @@ class VideoFeed
 
   private
 
+  def duplicate?(data, keys)
+    data['jobs'].any? do |job|
+      !%w[blocked opted_out awaiting_consent duplicate].include?(job['status']) && !(job['keys'] & keys).empty?
+    end
+  end
+
   def change
     @mutex.synchronize do
       draft = Marshal.load(Marshal.dump(@data))
+      draft['consent_requests'] ||= {}
+      draft['consent_requests'].delete_if { |_, request| request['expires_at'] <= @clock.call }
+      # Unapproved, expired file IDs need not be retained or deduplicated.
+      draft['jobs'].reject! { |job| job['status'] == 'awaiting_consent' && !draft['consent_requests'].key?(job['consent_request']) }
       result = yield draft
       if draft != @data || !File.exist?(@path)
         Tempfile.create(['.video-feed-', '.json'], File.dirname(File.expand_path(@path))) do |file|
@@ -327,7 +402,7 @@ rescue => e
   []
 end
 
-def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil)
+def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil, consent_request: nil)
   return unless video_feed && submitter
 
   Array(messages).each_with_index do |message, index|
@@ -337,7 +412,7 @@ def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy
     fingerprints = Array(keys[index]).dup
     fingerprints << "telegram:#{video.file_unique_id}" unless video.file_unique_id.to_s.empty?
     result = video_feed.enqueue(file_id: video.file_id, keys: fingerprints, submitter: submitter,
-                               private_chat: private_chat, privacy_version: privacy_version)
+                               private_chat: private_chat, privacy_version: privacy_version, consent_request: consent_request)
     puts "Video feed enqueue: #{result}"
   end
 rescue => e
@@ -345,7 +420,23 @@ rescue => e
   puts "Video feed enqueue error: #{e.class}"
 end
 
-def send_video_feed_privacy(bot, chat_id, user_id)
+def prepare_video_feed_submission(bot, message)
+  return nil unless video_feed
+
+  submitter = video_feed_submitter(message)
+  return nil unless submitter
+
+  context = video_feed.submission_context(submitter, private_chat: message.chat.type == 'private')
+  if context && context[:consent_request]
+    send_video_feed_privacy(bot, message.chat.id, message.from.id, consent_request: context[:consent_request])
+  end
+  context
+rescue => e
+  puts "Video feed submission preparation error: #{e.class}"
+  nil
+end
+
+def send_video_feed_privacy(bot, chat_id, user_id, consent_request: nil)
   return unless video_feed
 
   preference = video_feed.preference("user:#{user_id}")
@@ -354,12 +445,17 @@ def send_video_feed_privacy(bot, chat_id, user_id)
            when 'off' then 'Сейчас публикация твоих роликов отключена и в личке, и в группах.'
            else 'Видео из лички не публикуются без твоего согласия. Видео из групп участвуют в ленте; можно отключить все свои публикации.'
            end
+  scope = if consent_request
+            'Нажав «Публиковать анонимно», ты разрешаешь публикацию видео из только что присланного сообщения и следующих роликов. Если скачивание ещё идёт, видео попадёт в канал после успешной загрузки. Этот запрос действует 24 часа.'
+          else
+            'Выбор действует на будущие видео. Для публикации уже присланного ролика нажми согласие в запросе под его ссылкой.'
+          end
   text = "ПОБОЧКА — общая публичная видеолента: https://t.me/#{video_feed.username}\n\n" \
     "Успешно скачанные по ссылкам видео могут попадать туда без твоего имени, подписи и названия чата. Само содержимое ролика не скрывается.\n\n#{status}\n\n" \
-    "Выбор действует на будущие видео. Отключение также отменяет ожидающие публикации, но не удаляет уже вышедшие посты. Скачивание работает при любом выборе. Настройку можно изменить: /privacy."
+    "#{scope}\n\nОтключение также отменяет ожидающие публикации, но не удаляет уже вышедшие посты. Скачивание работает при любом выборе. Настройку можно изменить: /privacy."
   keyboard = { inline_keyboard: [
     [{ text: 'Не публиковать в Побочке', callback_data: 'feed_privacy:off' }],
-    [{ text: 'Публиковать анонимно', callback_data: 'feed_privacy:on' }]
+    [{ text: 'Публиковать анонимно', callback_data: ['feed_privacy:on', consent_request].compact.join(':') }]
   ] }
   bot.api.send_message(chat_id: chat_id, text: text, reply_markup: JSON.generate(keyboard))
 rescue => e
@@ -379,7 +475,8 @@ def handle_video_feed_privacy_command(bot, message, text)
 end
 
 def handle_video_feed_privacy_callback(bot, callback)
-  return false unless %w[feed_privacy:on feed_privacy:off].include?(callback.data)
+  match = callback.data.to_s.match(/\Afeed_privacy:(on|off)(?::([a-f0-9]{24}))?\z/)
+  return false unless match
 
   message = callback.message
   unless video_feed && message && message.chat.type == 'private' && callback.from &&
@@ -387,12 +484,18 @@ def handle_video_feed_privacy_callback(bot, callback)
     answer_video_feed_callback(bot, callback, 'Открой /privacy в личке с ботом.')
     return true
   end
-  enabled = callback.data == 'feed_privacy:on'
-  count = video_feed.set_preference("user:#{callback.from.id}", enabled: enabled)
+  enabled = match[1] == 'on'
+  consent_request = match[2]
+  count = video_feed.set_preference("user:#{callback.from.id}", enabled: enabled, consent_request: consent_request)
   answer_video_feed_callback(bot, callback, enabled ? 'Публикация включена' : 'Публикация отключена')
-  text = enabled ? 'Новые видео будут публиковаться анонимно в Побочке. Старую историю не публикуем.' :
+  text = enabled ? (consent_request ? 'Согласие принято для этого сообщения и следующих роликов. Успешно загруженные видео из него попадут в Побочку без повторной отправки ссылки, если их ещё нет в ленте.' :
+    'Новые видео будут публиковаться анонимно в Побочке. Старую историю не публикуем.') :
     "Твои видео больше не попадут в Побочку ни из лички, ни из групп. Отменено ожидающих публикаций: #{count}. Уже вышедшие посты не удалены."
   safe_send_message(bot, message.chat.id, "#{text}\nИзменить выбор: /privacy.")
+  true
+rescue VideoFeedError => e
+  answer_video_feed_callback(bot, callback, 'Запрос согласия уже не действует')
+  safe_send_message(bot, message.chat.id, e.message)
   true
 rescue => e
   puts "Video feed privacy error: #{e.class}"
@@ -424,6 +527,7 @@ def handle_video_feed_command(bot, message, text)
              when nil
                counts = feed.stats
                "Лента @#{feed.username}\nВ очереди: #{counts.fetch('queued', 0)}; опубликовано: #{counts.fetch('sent', 0)}; заблокировано отправителей: #{counts['banned']}.\n" \
+                 "Ожидают согласия: #{counts.fetch('awaiting_consent', 0)}.\n" \
                  "Ошибок публикации: #{counts.fetch('failed', 0)}; неопределённых отправок: #{counts.fetch('uncertain', 0)}.\n" \
                  "Удалено: #{counts.fetch('deleted', 0)}; ожидают удаления: #{counts.fetch('delete_pending', 0)}; ошибок удаления: #{counts.fetch('delete_failed', 0)}.\n\n" \
                  "/feed_ban ссылка_на_пост — заблокировать отправителя\n/feed_unban ссылка_на_пост — разблокировать\n/feed_purge ссылка_на_пост — удалить его посты после подтверждения (до 48 часов)\n/feed_retry_failed — повторить отклонённые Telegram публикации\nВсе команды — только здесь, в личке."
