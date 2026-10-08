@@ -107,7 +107,10 @@ def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context
   feed_keys = feed_context ? video_feed_keys(source_link, video_path) : []
   response = bot.api.send_video(**params)
   record_sent_videos(chat_id, response, sources: [source_name])
-  enqueue_video_feed(response, **feed_context, keys: [feed_keys]) if feed_context
+  if feed_context
+    visuals = video_feed_visuals([video_path], submitter: feed_context[:submitter])
+    enqueue_video_feed(response, **feed_context, keys: [feed_keys], visuals: visuals)
+  end
   message_id = response.respond_to?(:message_id) ? response.message_id : nil
   details = [
     "source=#{source_name}",
@@ -149,7 +152,10 @@ def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
   feed_keys = feed_context ? videos.map { |video| video_feed_keys(video[:link], video[:path]) } : []
   response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media), **uploads)
   record_sent_videos(chat_id, response, sources: videos.map { |video| video[:source] })
-  enqueue_video_feed(response, **feed_context, keys: feed_keys) if feed_context
+  if feed_context
+    visuals = video_feed_visuals(videos.map { |video| video[:path] }, submitter: feed_context[:submitter])
+    enqueue_video_feed(response, **feed_context, keys: feed_keys, visuals: visuals)
+  end
   response
 rescue => e
   puts "Ошибка отправки альбома: #{e.class}: #{e.message}"

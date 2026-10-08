@@ -6,8 +6,10 @@ require 'fileutils'
 require 'ostruct'
 require_relative '../lib/telegram_instwitter_bot/runtime_helpers'
 require_relative '../lib/telegram_instwitter_bot/video_feed'
+require_relative 'support/video_fingerprint_fixture'
 
 class VideoFeedTest < Minitest::Test
+  include VideoFingerprintFixture
   class ApiError < StandardError
     attr_reader :data
 
@@ -118,6 +120,73 @@ class VideoFeedTest < Minitest::Test
 
   def keyed_enqueue(keys, user: 'user:10')
     @feed.enqueue(file_id: "file-#{keys.join('-')}", keys: keys, submitter: user)
+  end
+
+  def test_visual_duplicates_from_other_people_survive_restart_and_keep_original_exemplar
+    visual = visual_fixture
+    assert_equal :queued, enqueue('1', visual: visual)
+    @feed.process_next
+    @feed = new_feed
+    copy = altered_visual(visual, (1 << 10) - 1)
+    assert_equal :duplicate, enqueue('2', 'user:20', visual: copy)
+    assert_equal visual, JSON.parse(File.read(@file))['jobs'].first['visual']
+    assert_equal :duplicate, enqueue('2', 'user:30') # learned exact alias
+    # Similarity is not transitive: the exemplar must never drift to the copy.
+    assert_equal :queued, enqueue('3', visual: altered_visual(copy, ((1 << 10) - 1) << 10))
+    assert_equal 2, @feed.stats['duplicates_skipped']
+  end
+
+  def test_visual_dedup_does_not_use_unapproved_or_opted_out_private_videos
+    context = first_submission
+    assert_equal :awaiting_consent, @feed.enqueue(file_id: 'private', keys: ['private'], visual: visual_fixture, **context)
+    assert_equal :queued, enqueue('public', 'user:20', visual: visual_fixture)
+    @feed.process_next
+    consent(context)
+    refute @feed.process_next
+    assert_equal 1, @feed.stats['duplicate']
+    @feed.set_preference('user:30', enabled: false)
+    assert_equal :private, enqueue('off', 'user:30', visual: visual_fixture)
+  end
+
+  def test_old_exact_record_is_enriched_only_after_consent
+    enqueue
+    context = first_submission
+    assert_equal :duplicate, @feed.enqueue(file_id: 'private', keys: ['key-1'], visual: visual_fixture, **context)
+    assert_nil JSON.parse(File.read(@file))['jobs'].first['visual']
+    assert_equal :duplicate, enqueue('1', 'user:20', visual: visual_fixture)
+    assert_equal :duplicate, enqueue('copy', 'user:30', visual: visual_fixture)
+  end
+
+  def test_new_visual_alias_is_rechecked_before_publication
+    enqueue('1')
+    enqueue('2', visual: visual_fixture)
+    enqueue('1', visual: visual_fixture)
+    2.times { @feed.process_next }
+    assert_equal 1, @api.calls.count { |name, _| name == :send_video }
+    assert_equal 1, @feed.stats['duplicate']
+  end
+
+  def test_missing_or_invalid_visual_signature_preserves_exact_dedup
+    assert_equal :queued, enqueue('1', visual: { 'v' => 999 })
+    assert_equal :duplicate, enqueue('1')
+    assert_equal :queued, enqueue('2', visual: visual_fixture)
+    assert_equal :queued, enqueue('3', visual: visual_fixture(43))
+  end
+
+  def test_visual_check_is_atomic_between_different_submitters
+    results = 8.times.map do |i|
+      Thread.new { enqueue(i.to_s, "user:#{i}", visual: altered_visual(visual_fixture, i)) }
+    end.map(&:value)
+    assert_equal 1, results.count(:queued)
+    assert_equal 7, results.count(:duplicate)
+  end
+
+  def test_visual_analysis_failure_or_opt_out_keeps_download_path_independent
+    VideoFingerprint.stub(:extract, ->(*_args, **_options) { raise 'decoder failure' }) do
+      assert_equal [], video_feed_visuals(['fixture'], submitter: 'user:10')
+      @feed.set_preference('user:10', enabled: false)
+      assert_equal [], video_feed_visuals(['fixture'], submitter: 'user:10')
+    end
   end
 
   def test_duplicate_remembers_alternative_links_and_file_ids_after_restart

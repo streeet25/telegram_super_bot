@@ -6,6 +6,7 @@ require_relative '../lib/telegram_instwitter_bot/runtime_helpers'
 require_relative '../lib/telegram_instwitter_bot/media_jobs'
 require_relative '../lib/telegram_instwitter_bot/video_feed'
 require_relative '../lib/telegram_instwitter_bot/onboarding'
+require_relative 'support/video_fingerprint_fixture'
 
 def check(condition, description)
   raise description unless condition
@@ -31,6 +32,15 @@ end
 
 def video_upload_metadata(_path)
   { width: 640, height: 480, duration: 2 }
+end
+
+# Decoder fixtures run separately against real ffmpeg. Here verify descriptors
+# survive the real delivery/album/consent path before temporary files disappear.
+VideoFingerprint.extend(VideoFingerprintFixture)
+VideoFingerprint.define_singleton_method(:extract) do |path, runner:, timeout:|
+  raise 'Fingerprinting after cleanup' unless File.file?(path)
+
+  visual_fixture(Digest::SHA256.file(path).hexdigest[0, 8].to_i(16))
 end
 
 class UploadApi
@@ -153,6 +163,8 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, feed_context: context,
       items: [22, 23].map { |id| { link: "https://x.com/test/status/#{id}", source: :twitter } })
     check(@video_feed.stats['queued'] == 3 && uploads.calls.last == :album, 'Album did not enqueue each successfully delivered video')
+    jobs = JSON.parse(File.read(File.join(dir, 'feed.json')))['jobs'].select { |job| job['status'] == 'queued' }
+    check(jobs.all? { |job| VideoFingerprint.valid?(job['visual']) }, 'Single/album visual descriptors were lost')
     uploads.fail_upload = true
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, feed_context: context,
       items: [{ link: 'https://x.com/test/status/24', source: :twitter }])

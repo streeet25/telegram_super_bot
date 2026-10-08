@@ -168,10 +168,32 @@ subsequent uploads through any known alias are suppressed too. The publisher
 rechecks duplicates before sending, including aliases discovered after enqueue.
 `/feed` reports the persistent number of skipped duplicate submissions (counted
 since the alias-dedup release). Private submissions without consent do not add
-new aliases to public records. Different re-encodes, crops or watermarks cannot
-be guaranteed to match without a shared known URL/hash/ID; this is exact identity
-deduplication, not visual similarity matching. Original replies to the submitting
-user/chat are unchanged; only the public feed is deduplicated. The worker has
+new aliases or visual signatures to public records.
+
+Visual deduplication additionally compares 24 sampled frames across the entire
+clip, using perceptual hashes, coarse colour and three fixed centre crops.
+Near-identical re-encodes, resized copies and modest symmetric edge crops can
+match even with different URLs and file IDs. At least 22 frames must agree in
+order, with sufficient contrast and motion; shared intros, still templates and
+uncertain matches fall back to exact identity. Original visual exemplars are
+never replaced by near-copies, preventing gradual similarity drift. Audio is
+not compared: the same picture with a different soundtrack can be a duplicate.
+Major crops, overlays, edits, time trims and low-motion clips are not guaranteed
+to match. This is conservative approximate matching, not a universal detector.
+
+Analysis runs **after** successful delivery to the user, before temporary-file
+cleanup. It uses the existing ffmpeg/ffprobe, one decoder thread, an eight-second
+per-video subprocess budget and a shared 16-second album budget (plus process
+termination/hash computation). Failure/missing tools/timeouts preserve exact
+deduplication and do not fail the download. Set `VIDEO_FEED_VISUAL_DEDUP=0` to
+skip new frame analysis. Only versioned compact hashes/colour summaries (~3 KiB
+per video) are stored in `video_feed.json`, not frames or downloaded media.
+The visual index grows from new submissions; old published records gain a
+signature when an authorized exact duplicate is seen again. No old videos are
+downloaded or republished for backfill. Preserve this state across restarts.
+
+Original replies to the submitting user/chat are unchanged; only the public
+feed is deduplicated. The worker has
 its own HTTP connection, bounded timeouts and a two-second interval; at most
 1,000 publications may wait. Queue overflow logs `Video feed enqueue: full`
 and does not affect the original download. Explicit 429/5xx rejections retry
@@ -185,6 +207,7 @@ Tests (the smoke scripts use a network-disabled Faraday test adapter):
 
 ```sh
 ruby test/video_feed_test.rb
+ruby test/video_fingerprint_test.rb # Includes generated ffmpeg fixtures; no network.
 bundle exec ruby test/video_feed_telegram_smoke.rb
 ruby test/photo_posts_test.rb
 bundle exec ruby test/photo_posts_telegram_smoke.rb

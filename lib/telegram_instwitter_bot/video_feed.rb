@@ -6,10 +6,11 @@ require 'digest'
 require 'securerandom'
 require 'uri'
 require 'thread'
+require_relative 'video_fingerprint'
 
 class VideoFeedError < StandardError; end
 
-# File IDs only: no downloaded files, captions, names or source chat titles.
+# File IDs and fingerprints only: no downloaded files, captions or chat titles.
 # One process owns the store. A separate publisher uses its own HTTP connection.
 class VideoFeed
   attr_reader :channel_id, :username
@@ -61,8 +62,9 @@ class VideoFeed
     end
   end
 
-  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil, consent_request: nil)
+  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil, consent_request: nil, visual: nil)
     return :ineligible if submitter.to_s.empty? || file_id.to_s.empty? || keys.empty?
+    visual = nil unless VideoFingerprint.valid?(visual)
 
     change do |data|
       next :banned if data['banned'].include?(submitter)
@@ -85,9 +87,10 @@ class VideoFeed
         next :private if privacy_version && privacy_version != current_version
         next :private if private_chat && data['preferences'][submitter] != 'on'
       end
-      next :duplicate if deduplicate!(data, keys, remember: !waiting)
+      next :duplicate if deduplicate!(data, keys, visual: visual, remember: !waiting)
       waiting_duplicate = data['jobs'].find do |job|
-        job['status'] == 'awaiting_consent' && job['consent_request'] == consent_request && !(job['keys'] & keys).empty?
+        job['status'] == 'awaiting_consent' && job['consent_request'] == consent_request &&
+          (!(job['keys'] & keys).empty? || VideoFingerprint.match?(job['visual'], visual))
       end
       if waiting_duplicate
         waiting_duplicate['keys'] |= keys
@@ -98,6 +101,7 @@ class VideoFeed
 
       data['jobs'] << {
         'id' => SecureRandom.hex(12), 'file_id' => file_id, 'keys' => keys.uniq,
+        'visual' => visual,
         'submitter' => submitter, 'status' => waiting ? 'awaiting_consent' : 'queued', 'attempts' => 0,
         'consent_request' => consent_request,
         'created_at' => @clock.call, 'next_at' => 0
@@ -139,7 +143,7 @@ class VideoFeed
           job['status'] = if data['banned'].include?(submitter)
                             'blocked'
                           elsif enabled && consent_request && job['consent_request'] == consent_request
-                            deduplicate!(data, job['keys']) ? 'duplicate' : 'queued'
+                            deduplicate!(data, job['keys'], visual: job['visual']) ? 'duplicate' : 'queued'
                           else
                             cancelled += 1
                             'opted_out'
@@ -247,7 +251,7 @@ class VideoFeed
           item['status'] == 'queued' && item['next_at'] <= @clock.call && !data['banned'].include?(item['submitter']) && data['preferences'][item['submitter']] != 'off'
         end
         if selected
-          if selected['status'] == 'queued' && deduplicate!(data, selected['keys'], candidate: selected)
+          if selected['status'] == 'queued' && deduplicate!(data, selected['keys'], visual: selected['visual'], candidate: selected)
             selected['status'] = 'duplicate'
             next selected.dup
           end
@@ -287,20 +291,29 @@ class VideoFeed
   # Keep every known alias, not just the first URL/file ID. A later upload may
   # use a known alternative URL while receiving a new hash or Telegram ID.
   # Pending private submissions must not enrich a public record before consent.
-  def deduplicate!(data, keys, remember: true, candidate: nil)
+  def deduplicate!(data, keys, visual: nil, remember: true, candidate: nil)
     candidate_index = data['jobs'].index(candidate) if candidate
-    matches = data['jobs'].each_with_index.map do |job, index|
+    eligible = data['jobs'].each_with_index.map do |job, index|
       next if %w[blocked opted_out awaiting_consent duplicate].include?(job['status'])
       next if candidate && (job['id'] == candidate['id'] || (job['status'] == 'queued' && index > candidate_index))
-      next if (job['keys'] & keys).empty?
 
       job
     end.compact
+    matches = eligible.select { |job| !(job['keys'] & keys).empty? }
+    if matches.empty? && visual
+      match = eligible.find { |job| VideoFingerprint.match?(job['visual'], visual) }
+      matches = [match] if match
+    end
     return false if matches.empty?
 
     if remember
       aliases = (keys + matches.flat_map { |job| job['keys'] }).uniq
-      matches.each { |job| job['keys'] = aliases.dup }
+      matches.each do |job|
+        job['keys'] = aliases.dup
+        # Enrich old exact-only records when seen again, but never replace a
+        # visual exemplar with each near-copy (that causes similarity drift).
+        job['visual'] ||= visual
+      end
     end
     data['duplicates_skipped'] = data.fetch('duplicates_skipped', 0) + 1
     true
@@ -432,7 +445,21 @@ rescue => e
   []
 end
 
-def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil, consent_request: nil)
+def video_feed_visuals(paths, submitter:)
+  return [] unless video_feed && video_feed.preference(submitter) != 'off'
+  return [] if ENV['VIDEO_FEED_VISUAL_DEDUP'] == '0'
+
+  deadline = VideoFingerprint.monotonic + 16
+  paths.map do |path|
+    VideoFingerprint.extract(path, runner: method(:run_command_with_limits),
+                             timeout: [8, deadline - VideoFingerprint.monotonic].min)
+  end
+rescue => e
+  puts "Video feed visual analysis skipped: #{e.class}"
+  []
+end
+
+def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil, consent_request: nil, visuals: [])
   return unless video_feed && submitter
 
   Array(messages).each_with_index do |message, index|
@@ -442,7 +469,8 @@ def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy
     fingerprints = Array(keys[index]).dup
     fingerprints << "telegram:#{video.file_unique_id}" unless video.file_unique_id.to_s.empty?
     result = video_feed.enqueue(file_id: video.file_id, keys: fingerprints, submitter: submitter,
-                               private_chat: private_chat, privacy_version: privacy_version, consent_request: consent_request)
+                               private_chat: private_chat, privacy_version: privacy_version, consent_request: consent_request,
+                               visual: visuals[index])
     puts "Video feed enqueue: #{result}"
   end
 rescue => e
