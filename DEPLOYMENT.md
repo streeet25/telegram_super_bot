@@ -8,7 +8,7 @@ The production bot runs on `root@5.61.91.77` in the Docker container
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The visual-deduplication release validated on 2026-10-08 is `videomorph:visual-20261008` (`sha256:690cfb33457f6f81fbae3aa30309b632e1cd17558449344ce21066c8b0323b98`). The previous image `videomorph:dedup-20261008` (`sha256:913eeb1242b2acd0e0c2189046e2ffa6e6f92a14842e9926d1a4c0df9f0b3809`) is retained for rollback.
+- The launcher pins the Docker image by digest. The per-link publication release validated on 2026-10-09 is `videomorph:link-controls-20261009` (`sha256:28aae1814608ed7b361128b4807be32c238f978d1cffa5ceb2461e5e8f3ce973`). The previous image `videomorph:visual-20261008` (`sha256:690cfb33457f6f81fbae3aa30309b632e1cd17558449344ce21066c8b0323b98`) is retained for rollback.
 
 Use `systemctl restart videomorph.service` to restart production. Do not manage the
 container lifecycle directly: the launcher uses `docker run --rm`, and systemd
@@ -50,6 +50,20 @@ videos wait as `awaiting_consent`; approval of their specific prompt releases
 them without re-downloading. Existing preferences/bans and generic old buttons
 retain their meaning. The rollout does not recover or republish videos discarded
 by the previous version; affected users can resubmit their original link once.
+
+Per-link `+` permissions persist as `one_off` with a privacy revision; an absent
+field preserves the old default behavior. `-` items have no feed context and are
+never queued. A new explicit global off revokes pending one-off permissions,
+even when the default was already off. No deployment changes existing choices.
+
+The user-authorized private link-control announcement is an explicit maintenance
+command, not part of startup: from `/var/lib/videomorph`, run
+`bundle _2.6.7_ exec ruby /opt/app/scripts/announce_link_controls.rb` for a read-only
+recipient-count preview, adding `--send` only to send the approved update.
+Preserve `/var/lib/videomorph/link_controls_announcement.json` (0600, 10001:10001)
+alongside other private state backups; it prevents duplicate announcements.
+Interrupted/ambiguous deliveries are not automatically retried. It never sends
+to groups or the feed channel and does not alter user privacy preferences.
 
 New photo entries include the original Telegram message timestamp (`sent_at`, Unix
 seconds). Existing undated entries are preserved without guessing their dates; use

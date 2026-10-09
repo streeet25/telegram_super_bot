@@ -139,6 +139,24 @@ privacy settings also invalidates feed eligibility of downloads already in progr
 except the explicitly approved initial submission. Opting out revokes its consent
 token too, so enabling publication again cannot revive that cancelled download.
 
+Per-link controls (private chats and groups):
+
+- `+ URL` (or `+URL`) explicitly authorizes just that video for anonymous public
+  publication, including when the user's general setting is off. It does not
+  enable future publications or create a generic consent prompt.
+- `- URL` (or `-URL`) downloads without submitting that video to the feed,
+  regardless of the user's setting or subsequent consent on the other links.
+- An unmarked URL retains the usual privacy/consent rules.
+
+Put a sign before **each** URL on the same line. Mixed 1–10-link batches keep
+their individual choices even if a download fails or Telegram returns an album.
+Unicode minus/dashes (`−`, `–`, `—`) also exclude publication. Conflicting signs
+or repeated occurrences of the exact same URL prefer exclusion. Signs within
+URL paths/query parameters do not change publication mode. Bans, protected
+content exclusions and deduplication apply to `+` too. Pressing the global off
+button again cancels queued one-off publications and invalidates their in-flight
+download permissions, even if the general setting was already off.
+
 Moderation commands work only in private chat. Each command rechecks that the
 caller is the channel owner or an administrator with delete permission:
 
@@ -207,11 +225,22 @@ Tests (the smoke scripts use a network-disabled Faraday test adapter):
 
 ```sh
 ruby test/video_feed_test.rb
+ruby test/video_link_choices_test.rb
+ruby test/link_controls_announcement_test.rb
 ruby test/video_fingerprint_test.rb # Includes generated ffmpeg fixtures; no network.
 bundle exec ruby test/video_feed_telegram_smoke.rb
 ruby test/photo_posts_test.rb
 bundle exec ruby test/photo_posts_telegram_smoke.rb
 ```
+
+The operator-only `scripts/announce_link_controls.rb` previews the number of
+known individual users by default. Run with `--send` only with authorization for
+this one-time private update. It never polls updates, sends to groups/channels,
+or changes publication preferences. Run from the persistent state directory.
+`link_controls_announcement.json` (0600) keeps a fixed recipient snapshot and
+delivery receipts: reruns skip delivered/unavailable/uncertain messages, and
+429s pause all sends until `retry_after`. Never delete this state to retry a
+broadcast. Users who never opened the bot or blocked it may be unreachable.
 
 ### Photo posts
 

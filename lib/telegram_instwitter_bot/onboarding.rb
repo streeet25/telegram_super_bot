@@ -110,6 +110,8 @@ def onboarding_instructions(language, bot_username)
 
       Commands:
 
+      For one video: + LINK publishes it anonymously in ПОБОЧКА, even if your general setting is off. - LINK downloads it without publication. No sign uses your current setting. Put a sign before each link on the same line; this never changes your setting for future videos. Bans and duplicate protection still apply.
+
       Command: I am in Belgium
       What it does: saves your location for time conversion and reminders.
       Example: I am in Kyiv
@@ -170,6 +172,8 @@ def onboarding_instructions(language, bot_username)
       Общая видеолента: если она включена, успешно скачанные видео из групп могут анонимно попадать в канал. Для видео из лички сначала нужно твоё согласие. Согласие в запросе к первой ссылке включает и этот ролик, даже если он уже скачан. Команда /privacy в личке позволяет отключить все свои публикации, включая видео из групп и ожидающую очередь, пока сам не включишь обратно. Уже опубликованные посты не удаляются. Имя и название чата не показываются; само содержимое видео не скрывается.
 
       Команды:
+
+      Для одного видео: + ССЫЛКА — анонимно опубликовать в ПОБОЧКЕ, даже при отключённой общей публикации. - ССЫЛКА — скачать без публикации. Без знака — по текущей настройке. Знак ставь перед каждой ссылкой на той же строке; настройка для следующих видео не меняется. Баны и защита от повторов действуют.
 
       Команда: я нахожусь в Бельгии
       Что делает: сохраняет ваше местоположение для конвертации времени и напоминаний.

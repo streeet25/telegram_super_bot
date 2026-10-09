@@ -20,13 +20,29 @@ def extract_video_link_items(text)
   seen = {}
   items = []
   text.to_s.scan(%r{https?://[^\s]+}i) do |raw_link|
+    offset = Regexp.last_match.begin(0)
+    prefix = text.to_s[0...offset].split("\n", -1).last.to_s
+    signs = prefix[/(?:\A|[[:blank:]])((?:[+\-−–—][[:blank:]]*)+)\z/, 1]
+    choice = signs ? (signs.match?(/[-−–—]/) ? :skip : :publish) : :default
     link = clean_media_link(raw_link)
     source = media_source_for_link(link)
     next unless source
-    next if seen[link]
+    if seen[link]
+      # Conflicting occurrences of the same URL must never override a minus.
+      existing = seen[link]
+      existing[:feed_choice] = if [existing[:feed_choice], choice].include?(:skip)
+                                 :skip
+                               elsif [existing[:feed_choice], choice].include?(:publish)
+                                 :publish
+                               else
+                                 :default
+                               end
+      next
+    end
 
-    seen[link] = true
-    items << { link: link, source: source }
+    item = { link: link, source: source, feed_choice: choice }
+    seen[link] = item
+    items << item
   end
   items
 end
@@ -108,7 +124,7 @@ def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context
   response = bot.api.send_video(**params)
   record_sent_videos(chat_id, response, sources: [source_name])
   if feed_context
-    visuals = video_feed_visuals([video_path], submitter: feed_context[:submitter])
+    visuals = video_feed_visuals([video_path], submitter: feed_context[:submitter], one_off: feed_context[:one_off])
     enqueue_video_feed(response, **feed_context, keys: [feed_keys], visuals: visuals)
   end
   message_id = response.respond_to?(:message_id) ? response.message_id : nil
@@ -149,12 +165,17 @@ def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
       metadata: video.fetch(:metadata, {})
     )
   end
-  feed_keys = feed_context ? videos.map { |video| video_feed_keys(video[:link], video[:path]) } : []
+  contexts = videos.map { |video| video.fetch(:feed_context, feed_context) }
+  feed_keys = videos.each_with_index.map { |video, i| contexts[i] ? video_feed_keys(video[:link], video[:path]) : [] }
   response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media), **uploads)
   record_sent_videos(chat_id, response, sources: videos.map { |video| video[:source] })
-  if feed_context
-    visuals = video_feed_visuals(videos.map { |video| video[:path] }, submitter: feed_context[:submitter])
-    enqueue_video_feed(response, **feed_context, keys: feed_keys, visuals: visuals)
+  eligible = contexts.each_index.select { |i| contexts[i] }
+  unless eligible.empty?
+    visuals = video_feed_visuals(eligible.map { |i| videos[i][:path] }, submitter: contexts[eligible.first][:submitter],
+                                one_off: eligible.any? { |i| contexts[i][:one_off] })
+    eligible.each_with_index do |i, visual_index|
+      enqueue_video_feed(Array(response)[i], **contexts[i], keys: [feed_keys[i]], visuals: [visuals[visual_index]])
+    end
   end
   response
 rescue => e
@@ -179,7 +200,10 @@ end
 def process_video_link_batch(bot, chat_id, items, feed_context: nil)
   downloaded = items.each_with_object([]) do |item, result|
     video = download_video_item(item)
-    result << video if video
+    if video
+      video[:feed_context] = item.fetch(:feed_context, feed_context)
+      result << video
+    end
   rescue MediaWithoutVideo => e
     puts "media skipped (#{item[:source]}): #{e.message}"
   rescue MediaDownloadBlocked => e
@@ -193,7 +217,7 @@ def process_video_link_batch(bot, chat_id, items, feed_context: nil)
 
   if downloaded.one?
     video = downloaded.first
-    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: feed_context, source_link: video[:link])
+    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: video[:feed_context], source_link: video[:link])
   else
     send_video_album(bot, chat_id, downloaded, caption: "Подборка из #{downloaded.size} видео", feed_context: feed_context)
   end

@@ -42,12 +42,16 @@ class VideoFeed
 
   # The token identifies only the submission that displayed the consent prompt.
   # It survives a restart but cannot revive submissions cancelled by an opt-out.
-  def submission_context(submitter, private_chat:)
+  def submission_context(submitter, private_chat:, one_off: false)
+    one_off = one_off == true
     change do |data|
-      next nil if data['banned'].include?(submitter) || data['preferences'][submitter] == 'off'
+      next nil if data['banned'].include?(submitter) || (!one_off && data['preferences'][submitter] == 'off')
 
       context = { submitter: submitter, private_chat: private_chat,
                   privacy_version: data['privacy_versions'].fetch(submitter, 0) }
+      # An explicit +URL consents to this item only, without changing defaults.
+      next context.merge(one_off: true) if one_off
+
       if private_chat && data['preferences'][submitter] != 'on'
         next nil if data['consent_requests'].size >= 1000
 
@@ -62,17 +66,20 @@ class VideoFeed
     end
   end
 
-  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil, consent_request: nil, visual: nil)
+  def enqueue(file_id:, keys:, submitter:, private_chat: false, privacy_version: nil, consent_request: nil, visual: nil, one_off: false)
     return :ineligible if submitter.to_s.empty? || file_id.to_s.empty? || keys.empty?
     visual = nil unless VideoFingerprint.valid?(visual)
 
     change do |data|
       next :banned if data['banned'].include?(submitter)
-      next :private if data['preferences'][submitter] == 'off'
+      one_off = one_off == true
+      next :private if !one_off && data['preferences'][submitter] == 'off'
 
       current_version = data['privacy_versions'].fetch(submitter, 0)
       waiting = false
-      if consent_request
+      if one_off
+        next :private unless privacy_version == current_version && consent_request.nil?
+      elsif consent_request
         request = data['consent_requests'][consent_request]
         next :private unless private_chat && request && request['submitter'] == submitter && request['privacy_version'] == privacy_version
 
@@ -104,6 +111,7 @@ class VideoFeed
         'visual' => visual,
         'submitter' => submitter, 'status' => waiting ? 'awaiting_consent' : 'queued', 'attempts' => 0,
         'consent_request' => consent_request,
+        'one_off' => one_off, 'privacy_version' => privacy_version,
         'created_at' => @clock.call, 'next_at' => 0
       }
       waiting ? :awaiting_consent : :queued
@@ -128,7 +136,8 @@ class VideoFeed
         end
         choice = enabled ? 'on' : 'off'
         changed = data['preferences'][submitter] != choice
-        if changed
+        # Pressing "off" again also revokes newer one-off/in-flight permissions.
+        if changed || !enabled
           data['privacy_versions'][submitter] = data['privacy_versions'].fetch(submitter, 0) + 1
         end
         data['preferences'][submitter] = choice
@@ -230,7 +239,7 @@ class VideoFeed
     change do |data|
       count = 0
       data['jobs'].each do |job|
-        next unless job['status'] == 'failed' && !data['banned'].include?(job['submitter']) && data['preferences'][job['submitter']] != 'off'
+        next unless job['status'] == 'failed' && publication_allowed?(data, job)
 
         job.merge!('status' => 'queued', 'attempts' => 0, 'next_at' => 0)
         count += 1
@@ -248,7 +257,7 @@ class VideoFeed
 
         selected = data['jobs'].find { |item| item['status'] == 'delete_pending' && item['next_at'] <= @clock.call }
         selected ||= data['jobs'].find do |item|
-          item['status'] == 'queued' && item['next_at'] <= @clock.call && !data['banned'].include?(item['submitter']) && data['preferences'][item['submitter']] != 'off'
+          item['status'] == 'queued' && item['next_at'] <= @clock.call && publication_allowed?(data, item)
         end
         if selected
           if selected['status'] == 'queued' && deduplicate!(data, selected['keys'], visual: selected['visual'], candidate: selected)
@@ -287,6 +296,12 @@ class VideoFeed
   end
 
   private
+
+  def publication_allowed?(data, job)
+    !data['banned'].include?(job['submitter']) &&
+      (data['preferences'][job['submitter']] != 'off' ||
+       (job['one_off'] == true && job['privacy_version'] == data['privacy_versions'].fetch(job['submitter'], 0)))
+  end
 
   # Keep every known alias, not just the first URL/file ID. A later upload may
   # use a known alternative URL while receiving a new hash or Telegram ID.
@@ -445,8 +460,8 @@ rescue => e
   []
 end
 
-def video_feed_visuals(paths, submitter:)
-  return [] unless video_feed && video_feed.preference(submitter) != 'off'
+def video_feed_visuals(paths, submitter:, one_off: false)
+  return [] unless video_feed && (one_off || video_feed.preference(submitter) != 'off')
   return [] if ENV['VIDEO_FEED_VISUAL_DEDUP'] == '0'
 
   deadline = VideoFingerprint.monotonic + 16
@@ -459,7 +474,7 @@ rescue => e
   []
 end
 
-def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil, consent_request: nil, visuals: [])
+def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy_version: nil, consent_request: nil, visuals: [], one_off: false)
   return unless video_feed && submitter
 
   Array(messages).each_with_index do |message, index|
@@ -470,7 +485,7 @@ def enqueue_video_feed(messages, submitter:, keys:, private_chat: false, privacy
     fingerprints << "telegram:#{video.file_unique_id}" unless video.file_unique_id.to_s.empty?
     result = video_feed.enqueue(file_id: video.file_id, keys: fingerprints, submitter: submitter,
                                private_chat: private_chat, privacy_version: privacy_version, consent_request: consent_request,
-                               visual: visuals[index])
+                               visual: visuals[index], one_off: one_off)
     puts "Video feed enqueue: #{result}"
   end
 rescue => e
@@ -478,13 +493,25 @@ rescue => e
   puts "Video feed enqueue error: #{e.class}"
 end
 
-def prepare_video_feed_submission(bot, message)
+def prepare_video_feed_items(bot, message, items)
+  contexts = {}
+  items.map do |item|
+    choice = item.fetch(:feed_choice, :default)
+    context = contexts.fetch(choice) do
+      contexts[choice] = prepare_video_feed_submission(bot, message, choice: choice)
+    end
+    item.merge(feed_context: context)
+  end
+end
+
+def prepare_video_feed_submission(bot, message, choice: :default)
   return nil unless video_feed
+  return nil unless [:default, :publish].include?(choice)
 
   submitter = video_feed_submitter(message)
   return nil unless submitter
 
-  context = video_feed.submission_context(submitter, private_chat: message.chat.type == 'private')
+  context = video_feed.submission_context(submitter, private_chat: message.chat.type == 'private', one_off: choice == :publish)
   if context && context[:consent_request]
     send_video_feed_privacy(bot, message.chat.id, message.from.id, consent_request: context[:consent_request])
   end
@@ -504,13 +531,13 @@ def send_video_feed_privacy(bot, chat_id, user_id, consent_request: nil)
            else 'Видео из лички не публикуются без твоего согласия. Видео из групп участвуют в ленте; можно отключить все свои публикации.'
            end
   scope = if consent_request
-            'Нажав «Публиковать анонимно», ты разрешаешь публикацию видео из только что присланного сообщения и следующих роликов. Если скачивание ещё идёт, видео попадёт в канал после успешной загрузки. Этот запрос действует 24 часа.'
+            'Нажав «Публиковать анонимно», ты разрешаешь публикацию ссылок без знака из только что присланного сообщения и следующих роликов. Если скачивание ещё идёт, видео попадёт в канал после успешной загрузки. Этот запрос действует 24 часа.'
           else
             'Выбор действует на будущие видео. Для публикации уже присланного ролика нажми согласие в запросе под его ссылкой.'
           end
   text = "ПОБОЧКА — общая публичная видеолента: https://t.me/#{video_feed.username}\n\n" \
     "Успешно скачанные по ссылкам видео могут попадать туда без твоего имени, подписи и названия чата. Само содержимое ролика не скрывается.\n\n#{status}\n\n" \
-    "#{scope}\n\nОтключение также отменяет ожидающие публикации, но не удаляет уже вышедшие посты. Скачивание работает при любом выборе. Настройку можно изменить: /privacy."
+    "#{scope}\n\nДля одной ссылки: «+ ссылка» — опубликовать только этот ролик, даже при отключённой общей публикации; «- ссылка» — скачать без публикации. Знак ставь перед каждой ссылкой на той же строке. Общая настройка не меняется.\n\nОтключение также отменяет ожидающие публикации, но не удаляет уже вышедшие посты. Скачивание работает при любом выборе. Настройку можно изменить: /privacy."
   keyboard = { inline_keyboard: [
     [{ text: 'Не публиковать в Побочке', callback_data: 'feed_privacy:off' }],
     [{ text: 'Публиковать анонимно', callback_data: ['feed_privacy:on', consent_request].compact.join(':') }]
@@ -546,9 +573,9 @@ def handle_video_feed_privacy_callback(bot, callback)
   consent_request = match[2]
   count = video_feed.set_preference("user:#{callback.from.id}", enabled: enabled, consent_request: consent_request)
   answer_video_feed_callback(bot, callback, enabled ? 'Публикация включена' : 'Публикация отключена')
-  text = enabled ? (consent_request ? 'Согласие принято для этого сообщения и следующих роликов. Успешно загруженные видео из него попадут в Побочку без повторной отправки ссылки, если их ещё нет в ленте.' :
+  text = enabled ? (consent_request ? 'Согласие принято для ссылок без знака из этого сообщения и следующих роликов. Успешно загруженные видео попадут в Побочку без повторной отправки ссылки, если их ещё нет в ленте. Ссылки с «-» не публикуются.' :
     'Новые видео будут публиковаться анонимно в Побочке. Старую историю не публикуем.') :
-    "Твои видео больше не попадут в Побочку ни из лички, ни из групп. Отменено ожидающих публикаций: #{count}. Уже вышедшие посты не удалены."
+    "Автопубликация твоих видео отключена и в личке, и в группах. Отменено ожидающих публикаций: #{count}. Уже вышедшие посты не удалены. Для разовой публикации можно прислать «+ ссылка», не меняя эту настройку."
   safe_send_message(bot, message.chat.id, "#{text}\nИзменить выбор: /privacy.")
   true
 rescue VideoFeedError => e

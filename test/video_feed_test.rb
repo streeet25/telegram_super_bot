@@ -559,6 +559,92 @@ class VideoFeedTest < Minitest::Test
     prepare_video_feed_submission(@bot, build_message('https://x.com/test/status/1'))
   end
 
+  def test_explicit_plus_publishes_once_without_enabling_private_defaults
+    context = prepare_video_feed_submission(@bot, build_message('+ https://x.com/a/status/1'), choice: :publish)
+    assert context[:one_off]
+    refute context[:consent_request]
+    assert_empty @api.calls
+    assert_equal :queued, complete_download(context)
+    @feed = new_feed
+    assert @feed.process_next
+    assert_nil @feed.preference('user:10')
+    assert_equal :private, enqueue('next', 'user:10', private_chat: true)
+  end
+
+  def test_plus_is_a_one_off_exception_to_opt_out_in_private_and_group_chats
+    @feed.set_preference('user:10', enabled: false)
+    [true, false].each_with_index do |private_chat, index|
+      context = @feed.submission_context('user:10', private_chat: private_chat, one_off: true)
+      assert_equal :queued, complete_download(context, index.to_s)
+    end
+    @feed = new_feed
+    2.times { assert @feed.process_next }
+    assert_equal 'off', @feed.preference('user:10')
+    assert_equal :private, enqueue('next')
+  end
+
+  def test_repeated_off_revokes_queued_and_in_flight_plus_while_already_off
+    @feed.set_preference('user:10', enabled: false)
+    context = @feed.submission_context('user:10', private_chat: true, one_off: true)
+    complete_download(context)
+    assert_equal 1, @feed.set_preference('user:10', enabled: false)
+    assert_equal :private, complete_download(context, 'in-flight')
+    refute @feed.process_next
+    @feed.set_preference('user:10', enabled: true)
+    refute @feed.process_next
+    assert_equal :private, complete_download(context, 'stale')
+  end
+
+  def test_plus_does_not_bypass_bans_protection_or_duplicate_detection
+    context = @feed.submission_context('user:10', private_chat: true, one_off: true)
+    assert_equal :queued, complete_download(context)
+    @feed.process_next
+    assert_equal :duplicate, complete_download(context)
+    @feed.moderate('ban', 1, actor_id: 42)
+    assert_nil @feed.submission_context('user:10', private_chat: true, one_off: true)
+    assert_equal :banned, complete_download(context, 'banned')
+    assert_nil prepare_video_feed_submission(@bot, build_message('', has_protected_content: true), choice: :publish)
+  end
+
+  def test_one_off_requires_current_version_and_cannot_mix_with_generic_consent
+    assert_equal :private, enqueue('unsafe', one_off: true)
+    context = first_submission
+    assert_equal :private, complete_download(context.merge(one_off: true))
+  end
+
+  def test_one_off_retry_stays_authorized_while_default_remains_off
+    @feed.set_preference('user:10', enabled: false)
+    context = @feed.submission_context('user:10', private_chat: true, one_off: true)
+    complete_download(context)
+    @api.error = ApiError.new(403)
+    @feed.process_next
+    @api.error = nil
+    assert_includes @feed.retry_failed, '1'
+    assert @feed.process_next
+  end
+
+  def test_mixed_choices_have_separate_contexts_and_one_generic_consent_prompt
+    items = [:skip, :publish, :default, :default].map { |choice| { feed_choice: choice } }
+    prepared = prepare_video_feed_items(@bot, build_message(''), items)
+    assert_nil prepared[0][:feed_context]
+    assert prepared[1][:feed_context][:one_off]
+    assert prepared[2][:feed_context][:consent_request]
+    assert_equal prepared[2][:feed_context], prepared[3][:feed_context]
+    assert_equal 1, @api.calls.count { |name, _| name == :send_message }
+    assert_nil @feed.preference('user:10')
+    assert_equal :queued, complete_download(prepared[1][:feed_context], 'plus')
+    assert_equal :awaiting_consent, complete_download(prepared[2][:feed_context], 'normal')
+    consent(prepared[2][:feed_context])
+    assert_equal 2, @feed.stats['queued']
+  end
+
+  def test_only_minus_does_not_create_a_consent_prompt_or_store_submission
+    items = prepare_video_feed_items(@bot, build_message(''), [{ feed_choice: :skip }])
+    assert_nil items.first[:feed_context]
+    assert_empty @api.calls
+    assert_empty JSON.parse(File.read(@file))['consent_requests']
+  end
+
   def complete_download(context, id = 'first')
     @feed.enqueue(file_id: "file-#{id}", keys: ["key-#{id}"], **context)
   end

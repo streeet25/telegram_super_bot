@@ -237,8 +237,8 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         if received_link_count > video_link_items.size
           safe_send_message(bot, chat_id, "В одном посте обрабатываю первые #{MAX_MEDIA_LINKS_PER_MESSAGE} видео-ссылок.")
         end
-        feed_context = prepare_video_feed_submission(bot, message)
-        enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items, feed_context: feed_context })
+        video_link_items = prepare_video_feed_items(bot, message, video_link_items)
+        enqueue_media_job(media_queue, bot, chat_id, { type: :video_link_batch, chat_id: chat_id, items: video_link_items })
         next
       end
 

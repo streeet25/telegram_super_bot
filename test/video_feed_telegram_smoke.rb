@@ -173,6 +173,28 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
       items: [{ link: 'https://x.com/test/status/missing', source: :twitter }])
     check(@video_feed.stats['queued'] == 3, 'Missing download entered public feed')
   end
+
+  mixed = extract_video_link_items('+ https://www.instagram.com/reel/test/ - https://www.youtube.com/shorts/test https://x.com/test/status/30?q=a-b+c')
+  check(mixed.map { |item| item[:source] } == [:instagram, :youtube_shorts, :twitter], 'Provider extraction changed')
+  check(mixed.map { |item| item[:feed_choice] } == [:publish, :skip, :default], 'Real provider regexes lost publication choices')
+  @video_feed = VideoFeed.new(path: File.join(dir, 'choices.json'), api: api, channel_id: -10042, username: 'pobo4ka_ink')
+  uploads = UploadApi.new
+  upload_bot = Struct.new(:api).new(uploads)
+  text = "+ https://x.com/test/status/missing\n- https://x.com/test/status/61\n+ https://x.com/test/status/62\nhttps://x.com/test/status/63\n- https://x.com/test/status/64"
+  items = prepare_video_feed_items(bot, typed_message(200, text: text), extract_video_link_items(text))
+  Dir.chdir(dir) do
+    process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: items)
+    jobs = JSON.parse(File.read('choices.json'))['jobs']
+    check(jobs.map { |job| [job['file_id'], job['status']] } == [['upload203', 'queued'], ['upload204', 'awaiting_consent']], 'Minus/plus got misaligned after failed download or album upload')
+    context = items.find { |item| item[:feed_choice] == :default }[:feed_context]
+    @video_feed.set_preference('user:10', enabled: true, consent_request: context[:consent_request])
+    check(@video_feed.stats['queued'] == 2, 'Generic consent released a minus-marked video')
+    @video_feed.set_preference('user:10', enabled: false)
+    plus = prepare_video_feed_items(bot, typed_message(201), extract_video_link_items('+ https://x.com/test/status/70'))
+    process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: plus)
+    check(@video_feed.stats['queued'] == 1 && @video_feed.preference('user:10') == 'off', 'One-off private plus lost authorization or changed defaults')
+    check(@video_feed.process_next, 'Publisher ignored a plus while general publication was off')
+  end
   %w[ru en].each { |language| check(onboarding_instructions(language, 'test_bot').length <= 4096, 'Help exceeds limit') }
 end
 stubs.verify_stubbed_calls
