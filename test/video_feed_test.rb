@@ -449,6 +449,9 @@ class VideoFeedTest < Minitest::Test
     assert_equal first, second
     assert_equal video_feed_keys('https://www.instagram.com/reel/abc/?igsh=x', file), video_feed_keys('https://instagram.com/p/abc/', file)
     assert_equal video_feed_keys('https://youtube.com/shorts/ABC?si=x', file), video_feed_keys('https://m.youtube.com/shorts/ABC', file)
+    assert_equal video_feed_keys('http://threads.net/@one/post/ABC/?x=1', file), video_feed_keys('https://www.threads.com/@two/post/ABC', file)
+    assert_equal video_feed_keys('https://threads.net/t/ABC', file), video_feed_keys('https://threads.com/@two/post/ABC', file)
+    refute_equal video_feed_keys('https://threads.com/t/DEF', file), video_feed_keys('https://threads.com/t/ABC', file)
     refute_includes first.join, 'one'
   end
 

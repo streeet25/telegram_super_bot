@@ -264,7 +264,9 @@ def ytdlp_no_video?(error_output)
 end
 
 def ytdlp_metadata_failure_message(error_output, source_name:)
-  if ytdlp_auth_failure?(error_output)
+  if source_name == 'Threads'
+    'Не удалось прочитать пост Threads. Он может быть закрыт, удалён или временно недоступен. Попробуй прямую ссылку вида threads.com/@имя/post/код.'
+  elsif ytdlp_auth_failure?(error_output)
     "Не удалось получить видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
   else
     "Не удалось получить метаданные видео через yt-dlp. Проверь версию yt-dlp и лог ошибки."
@@ -273,7 +275,11 @@ end
 
 def ytdlp_download_failure_message(error_output, source_name:)
   if ytdlp_auth_failure?(error_output)
-    "Не удалось скачать видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
+    if source_name == 'Threads'
+      'Threads временно не отдаёт видео. Попробуй позже; доступны только публичные посты.'
+    else
+      "Не удалось скачать видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
+    end
   elsif error_output.match?(/File is larger than max-filesize|larger than max-filesize|maximum file size/i)
     "Видео не удалось уложить в лимит скачивания. Попробуй ссылку на более короткое видео или увеличь YTDLP_MAX_FILESIZE_MB."
   else
@@ -281,7 +287,7 @@ def ytdlp_download_failure_message(error_output, source_name:)
   end
 end
 
-def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: false, source_name: "этого источника")
+def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: false, source_name: "этого источника", extra_args: [])
   cmd = [
     ytdlp_path,
     "--no-playlist",
@@ -292,6 +298,7 @@ def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: f
     "--no-progress",
     "--dump-json",
     "--skip-download",
+    *extra_args,
     *ytdlp_network_args,
     *cookie_args,
     post_url
@@ -382,7 +389,9 @@ def download_video_with_ytdlp(
   tmp_prefix,
   require_success: false,
   source_name: "этого источника",
-  format_candidates: nil
+  format_candidates: nil,
+  extra_args: [],
+  use_cookies: true
 )
   ytdlp_path = find_executable("yt-dlp")
   unless ytdlp_path
@@ -391,13 +400,14 @@ def download_video_with_ytdlp(
     return nil
   end
 
-  cookie_args = ytdlp_cookie_args
+  cookie_args = use_cookies ? ytdlp_cookie_args : []
   media_info = probe_ytdlp_media_info(
     ytdlp_path,
     post_url,
     cookie_args,
     require_success: require_success,
-    source_name: source_name
+    source_name: source_name,
+    extra_args: extra_args
   )
   unless media_info
     raise MediaDownloadBlocked, "Не удалось получить метаданные видео через yt-dlp." if require_success
@@ -430,6 +440,7 @@ def download_video_with_ytdlp(
       "--match-filter", "!is_live",
       "--concurrent-fragments", "1",
       "--merge-output-format", "mp4",
+      *extra_args,
       *ytdlp_network_args,
       "-f", format,
       "-o", output_template

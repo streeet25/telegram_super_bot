@@ -1,6 +1,6 @@
 # Telegram Instwitter Bot
 
-A Telegram bot that downloads and sends media from Twitter/X, Instagram, and YouTube Shorts links, captures tweet screenshots, converts time between Moscow, Kyiv, and Brussels, and supports simple reminders.
+A Telegram bot that downloads and sends media from Twitter/X, Instagram, Threads, and YouTube Shorts links, captures tweet screenshots, converts time between Moscow, Kyiv, and Brussels, and supports simple reminders.
 
 The bot currently understands Russian user commands and replies. Code comments and project documentation are kept in English for easier public maintenance.
 
@@ -8,6 +8,7 @@ The bot currently understands Russian user commands and replies. Code comments a
 
 - Downloads Twitter/X videos with `yt-dlp`.
 - Downloads Instagram videos with `yt-dlp`.
+- Downloads the first own video from public Threads posts (`threads.com` and `threads.net`, including `/t/` and `/share/` links). Quotes and recommended posts are not substituted.
 - Combines 2–10 supported video links from one message into one Telegram media-group post.
 - Re-sends a post assembled from the most recently sent videos in the chat.
 - Collects user-uploaded photos and assembles forwardable photo albums on request, preserving order and captions.
@@ -80,6 +81,7 @@ The bot stores runtime state in `user_locations.json`, `user_languages.json`, `r
 - `lib/telegram_instwitter_bot/photo_posts.rb` stores incoming photo file IDs and assembles photo posts, isolated by chat, sender, and forum topic.
 - `lib/telegram_instwitter_bot/video_feed.rb` owns the persistent feed queue, deduplication, privacy preferences and moderation.
 - `lib/telegram_instwitter_bot/ytdlp.rb`, `twitter.rb`, `instagram.rb`, and `youtube_shorts.rb` handle media lookup/download helpers.
+- `lib/telegram_instwitter_bot/threads.rb` and `ytdlp_plugins/videomorph/yt_dlp_plugins/extractor/videomorph_threads.py` handle public Threads posts through a bundled, source-controlled yt-dlp plugin. Include the `ytdlp_plugins` directory when deploying; no plugin install or extra credentials are needed. It reads public preview data, without Instagram cookies. Private/deleted posts or changes to the preview format can make extraction unavailable. Text/photo-only posts return an explanation; quotes are never used as fallback. `/share/` must resolve to a verified canonical post.
 - `lib/telegram_instwitter_bot/spotify_youtube.rb` resolves Spotify tracks to YouTube video links.
 
 ## Commands
@@ -97,7 +99,7 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `напомни время 21:00 по Киеву текст` / `remind me at 21:00 in Kyiv text` | Creates a reminder. If today's time has passed, it schedules tomorrow. | `@bot_username remind me at 21:00 in Kyiv call Alex` |
 | `фото <tweet>` / `photo <tweet>` | Sends a tweet screenshot/photo. | `@bot_username photo https://x.com/user/status/123` |
 | `фото ночной <tweet>` / `photo dark <tweet>` | Sends a tweet screenshot/photo in dark mode. | `@bot_username photo dark https://x.com/user/status/123` |
-| 2–10 Twitter/X, Instagram, or YouTube Shorts links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://www.youtube.com/shorts/...` |
+| 2–10 Twitter/X, Instagram, Threads, or YouTube Shorts links | Downloads the videos and sends them as one Telegram media-group post. One link is sent as a normal video. | `https://instagram.com/reel/... https://www.youtube.com/shorts/...` |
 | `собери пост из последних 3 видео` | Re-sends the last 2–10 videos previously sent by the bot in this chat as one post. | `@bot_username собери пост из последних 3 видео` |
 | `собери пост` / `assemble post` / `/post` | Sends your new uploaded photos as one forwardable album (2–10 photos), or one standalone photo. | Send photos, then send `собери пост` separately. |
 | `собери пост из последних 3 фото` / `assemble post from last 3 photos` | Selects the last 1–10 photos sent by you in this chat/topic. | `собери пост из последних 3 фото` |
@@ -105,7 +107,9 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 | `собери пост за 1 час` / `собери пост за 2 часа` / `assemble post from last 2 hours` | Selects your saved photos sent during the requested number of hours before the command. | `@bot_username собери пост за 2 часа` |
 | Spotify track link | Finds a matching YouTube link. | `https://open.spotify.com/track/...` |
 
-Plain Twitter/X, Instagram, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files.
+Plain Twitter/X, Instagram, Threads, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files. Threads uses the same per-video buttons, `+`/`-` choices, 30-second default publication window, and duplicate checks as other providers.
+
+Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (the latter needs the same Python environment as yt-dlp) for offline Threads coverage, plus the existing feed and native Telegram smoke tests. Live verification should call the downloader without sending messages or publishing to the channel.
 
 ### Anonymous video feed (ПОБОЧКА)
 

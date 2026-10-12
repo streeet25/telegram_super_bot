@@ -462,6 +462,8 @@ def video_feed_keys(link, path)
                 "ig:#{match[1]}"
               elsif host == 'youtube.com' && (match = uri.path.match(%r{\A/shorts/([^/]+)}))
                 "yt:#{match[1]}"
+              elsif %w[threads.com threads.net].include?(host) && (match = uri.path.match(%r{\A/(?:@[^/]+/post|t)/([A-Za-z0-9_-]+)/?\z}))
+                "threads:#{match[1]}"
               else
                 "#{host}#{uri.path}"
               end

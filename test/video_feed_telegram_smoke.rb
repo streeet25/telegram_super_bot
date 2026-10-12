@@ -2,6 +2,7 @@
 
 ENV['TELEGRAM_BOT_TOKEN'] = '000:feed-tests'
 require_relative '../lib/telegram_instwitter_bot/config'
+require_relative '../lib/telegram_instwitter_bot/threads'
 require_relative '../lib/telegram_instwitter_bot/runtime_helpers'
 require_relative '../lib/telegram_instwitter_bot/media_jobs'
 require_relative '../lib/telegram_instwitter_bot/video_feed'
@@ -32,6 +33,10 @@ end
 
 def video_upload_metadata(_path)
   { width: 640, height: 480, duration: 2 }
+end
+
+def download_threads_video(link)
+  download_twitter_video(link)
 end
 
 # Decoder fixtures run separately against real ffmpeg. Here verify descriptors
@@ -198,13 +203,14 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
     check(@video_feed.stats['queued'] == 3, 'Missing download entered public feed')
   end
 
-  mixed = extract_video_link_items('+ https://www.instagram.com/reel/test/ - https://www.youtube.com/shorts/test https://x.com/test/status/30?q=a-b+c')
-  check(mixed.map { |item| item[:source] } == [:instagram, :youtube_shorts, :twitter], 'Provider extraction changed')
-  check(mixed.map { |item| item[:feed_choice] } == [:publish, :skip, :default], 'Real provider regexes lost publication choices')
+  mixed = extract_video_link_items('+ https://www.instagram.com/reel/test/ - https://www.youtube.com/shorts/test https://x.com/test/status/30?q=a-b+c + http://threads.net/@katia_lok/post/DeWshaKHBhY?x=1')
+  check(mixed.map { |item| item[:source] } == [:instagram, :youtube_shorts, :twitter, :threads], 'Provider extraction changed')
+  check(mixed.map { |item| item[:feed_choice] } == [:publish, :skip, :default, :publish], 'Real provider regexes lost publication choices')
+  check(extract_video_link_items('https://threads.com/@p https://t.me/channel/1 https://threads.com.evil/t/abc').empty?, 'Unrelated links became downloads')
   @video_feed = VideoFeed.new(path: File.join(dir, 'choices.json'), api: api, channel_id: -10042, username: 'pobo4ka_ink')
   uploads = UploadApi.new
   upload_bot = Struct.new(:api).new(uploads)
-  text = "+ https://x.com/test/status/missing\n- https://x.com/test/status/61\n+ https://x.com/test/status/62\nhttps://x.com/test/status/63\n- https://x.com/test/status/64"
+  text = "+ https://x.com/test/status/missing\n- https://threads.com/@p/post/61\n+ https://threads.net/t/62\nhttps://threads.com/t/63\n- https://x.com/test/status/64"
   items = prepare_video_feed_items(bot, typed_message(200, text: text), extract_video_link_items(text))
   Dir.chdir(dir) do
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: items)
@@ -215,7 +221,7 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
     @video_feed.set_preference('user:10', enabled: true, consent_request: context[:consent_request])
     check(@video_feed.stats['queued'] == 2, 'Generic consent released a minus-marked video')
     @video_feed.set_preference('user:10', enabled: false)
-    plus = prepare_video_feed_items(bot, typed_message(201), extract_video_link_items('+ https://x.com/test/status/70'))
+    plus = prepare_video_feed_items(bot, typed_message(201), extract_video_link_items('+ https://threads.com/t/70'))
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: plus)
     check(@video_feed.stats['queued'] == 1 && @video_feed.preference('user:10') == 'off', 'One-off private plus lost authorization or changed defaults')
     check(@video_feed.process_next, 'Publisher ignored a plus while general publication was off')

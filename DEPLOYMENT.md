@@ -8,7 +8,17 @@ The production bot runs on `root@5.61.91.77` in the Docker container
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The per-video buttons release validated on 2026-10-12 is `videomorph:buttons-20261012` (`sha256:fedb821a76a1227d5b4699248af9d8db077354194704ed72152eadbd73be435f`). The previous image `videomorph:link-controls-20261009` (`sha256:28aae1814608ed7b361128b4807be32c238f978d1cffa5ceb2461e5e8f3ce973`) is retained for rollback; see the unpublished-control migration below before starting a pre-button image.
+- The launcher pins the Docker image by digest. The Threads release validated on 2026-10-12 is `videomorph:threads-20261012` (`sha256:3dd364279f2704e8c6f2c3e61401a449652774b995f8f4bc30b670476d25ba97`). The previous image `videomorph:buttons-20261012` (`sha256:fedb821a76a1227d5b4699248af9d8db077354194704ed72152eadbd73be435f`) is retained for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+
+The Threads release adds `/opt/app/ytdlp_plugins/videomorph/yt_dlp_plugins/extractor/videomorph_threads.py`.
+Preserve this directory in the image, not just Ruby files. Only Threads calls enable
+it through `--plugin-dirs`; other providers keep their existing extractor/cookie
+behavior. It uses public preview data without the Instagram cookie jar. Verify
+with `/opt/venv/bin/python /opt/app/test/threads_extractor_test.py` (the system
+Python does not include yt-dlp), the Ruby tests and both Telegram smoke tests.
+The supplied `katia_lok/DeWshaKHBhY` post downloaded as a 12-second 720×1280 MP4
+in the candidate without Telegram sends. No data migration or announcement is
+part of this release; preserve all existing state, privacy settings and receipts.
 
 Use `systemctl restart videomorph.service` to restart production. Do not manage the
 container lifecycle directly: the launcher uses `docker run --rm`, and systemd

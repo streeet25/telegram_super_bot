@@ -6,7 +6,7 @@
 STDOUT.sync = true
 STDERR.sync = true
 
-%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts time_locations media_jobs photo_posts video_feed onboarding].each do |file|
+%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts threads time_locations media_jobs photo_posts video_feed onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
 
