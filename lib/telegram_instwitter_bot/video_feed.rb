@@ -10,7 +10,7 @@ require_relative 'video_fingerprint'
 
 class VideoFeedError < StandardError; end
 
-# File IDs and fingerprints only: no downloaded files, captions or chat titles.
+# File IDs, fingerprints and bot-authored control labels, no downloaded media.
 # One process owns the store. A separate publisher uses its own HTTP connection.
 class VideoFeed
   attr_reader :channel_id, :username
@@ -71,29 +71,11 @@ class VideoFeed
     visual = nil unless VideoFingerprint.valid?(visual)
 
     change do |data|
-      next :banned if data['banned'].include?(submitter)
-      one_off = one_off == true
-      next :private if !one_off && data['preferences'][submitter] == 'off'
+      status = submission_status(data, submitter: submitter, private_chat: private_chat,
+                                 privacy_version: privacy_version, consent_request: consent_request, one_off: one_off)
+      next status unless [:queued, :awaiting_consent].include?(status)
 
-      current_version = data['privacy_versions'].fetch(submitter, 0)
-      waiting = false
-      if one_off
-        next :private unless privacy_version == current_version && consent_request.nil?
-      elsif consent_request
-        request = data['consent_requests'][consent_request]
-        next :private unless private_chat && request && request['submitter'] == submitter && request['privacy_version'] == privacy_version
-
-        if request.key?('approved_version')
-          next :private unless request['approved_version'] == current_version && data['preferences'][submitter] == 'on'
-        else
-          next :private unless request['privacy_version'] == current_version && data['preferences'][submitter].nil?
-
-          waiting = true
-        end
-      else
-        next :private if privacy_version && privacy_version != current_version
-        next :private if private_chat && data['preferences'][submitter] != 'on'
-      end
+      waiting = status == :awaiting_consent
       next :duplicate if deduplicate!(data, keys, visual: visual, remember: !waiting)
       waiting_duplicate = data['jobs'].find do |job|
         job['status'] == 'awaiting_consent' && job['consent_request'] == consent_request &&
@@ -152,6 +134,7 @@ class VideoFeed
           job['status'] = if data['banned'].include?(submitter)
                             'blocked'
                           elsif enabled && consent_request && job['consent_request'] == consent_request
+                            job['next_at'] = [job['next_at'], @clock.call + job.fetch('control_delay', 0)].max
                             deduplicate!(data, job['keys'], visual: job['visual']) ? 'duplicate' : 'queued'
                           else
                             cancelled += 1
@@ -257,7 +240,8 @@ class VideoFeed
 
         selected = data['jobs'].find { |item| item['status'] == 'delete_pending' && item['next_at'] <= @clock.call }
         selected ||= data['jobs'].find do |item|
-          item['status'] == 'queued' && item['next_at'] <= @clock.call && publication_allowed?(data, item)
+          item['status'] == 'queued' && item['next_at'] <= @clock.call &&
+            (!item['control_expires_at'] || item['control_ready']) && publication_allowed?(data, item)
         end
         if selected
           if selected['status'] == 'queued' && deduplicate!(data, selected['keys'], visual: selected['visual'], candidate: selected)
@@ -271,6 +255,7 @@ class VideoFeed
       end
       return false unless job
       if job['status'] == 'duplicate'
+        refresh_video_feed_control(@api, job.merge('status' => 'duplicate')) if job['control_expires_at']
         puts 'Video feed delivery: duplicate skipped'
         return true
       end
@@ -286,6 +271,7 @@ class VideoFeed
           raise VideoFeedError, 'Missing Telegram message ID' unless response.respond_to?(:message_id) && response.message_id
 
           update_job(job['id'], 'status' => 'sent', 'message_id' => response.message_id, 'sent_at' => @clock.call)
+          refresh_video_feed_control(@api, job.merge('status' => 'sent')) if job['control_expires_at']
         end
         puts "Video feed delivery: #{deleting ? 'deleted' : 'sent'}"
       rescue => e
@@ -296,6 +282,28 @@ class VideoFeed
   end
 
   private
+
+  def submission_status(data, submitter:, private_chat: false, privacy_version: nil, consent_request: nil, one_off: false)
+    return :banned if data['banned'].include?(submitter)
+    return :private if one_off != true && data['preferences'][submitter] == 'off'
+
+    current = data['privacy_versions'].fetch(submitter, 0)
+    if one_off == true
+      return privacy_version == current && consent_request.nil? ? :queued : :private
+    end
+    if consent_request
+      request = data['consent_requests'][consent_request]
+      return :private unless private_chat && request && request['submitter'] == submitter && request['privacy_version'] == privacy_version
+      if request.key?('approved_version')
+        return request['approved_version'] == current && data['preferences'][submitter] == 'on' ? :queued : :private
+      end
+      return request['privacy_version'] == current && data['preferences'][submitter].nil? ? :awaiting_consent : :private
+    end
+    return :private if privacy_version && privacy_version != current
+    return :private if private_chat && data['preferences'][submitter] != 'on'
+
+    :queued
+  end
 
   def publication_allowed?(data, job)
     !data['banned'].include?(job['submitter']) &&
@@ -309,7 +317,7 @@ class VideoFeed
   def deduplicate!(data, keys, visual: nil, remember: true, candidate: nil)
     candidate_index = data['jobs'].index(candidate) if candidate
     eligible = data['jobs'].each_with_index.map do |job, index|
-      next if %w[blocked opted_out awaiting_consent duplicate].include?(job['status'])
+      next if %w[blocked opted_out awaiting_choice awaiting_consent duplicate].include?(job['status'])
       next if candidate && (job['id'] == candidate['id'] || (job['status'] == 'queued' && index > candidate_index))
 
       job
@@ -341,6 +349,11 @@ class VideoFeed
       draft['consent_requests'].delete_if { |_, request| request['expires_at'] <= @clock.call }
       # Unapproved, expired file IDs need not be retained or deduplicated.
       draft['jobs'].reject! { |job| job['status'] == 'awaiting_consent' && !draft['consent_requests'].key?(job['consent_request']) }
+      draft['jobs'].reject! do |job|
+        job['control_expires_at'] && job['control_expires_at'] <= @clock.call &&
+          (%w[awaiting_choice opted_out duplicate blocked].include?(job['status']) ||
+           (job['status'] == 'queued' && !job['control_ready']))
+      end
       result = yield draft
       if draft != @data || !File.exist?(@path)
         Tempfile.create(['.video-feed-', '.json'], File.dirname(File.expand_path(@path))) do |file|
@@ -500,7 +513,8 @@ def prepare_video_feed_items(bot, message, items)
     context = contexts.fetch(choice) do
       contexts[choice] = prepare_video_feed_submission(bot, message, choice: choice)
     end
-    item.merge(feed_context: context)
+    control = prepare_video_feed_control(message, choice)
+    item.merge(feed_context: context, feed_control: control)
   end
 end
 
@@ -573,6 +587,9 @@ def handle_video_feed_privacy_callback(bot, callback)
   consent_request = match[2]
   count = video_feed.set_preference("user:#{callback.from.id}", enabled: enabled, consent_request: consent_request)
   answer_video_feed_callback(bot, callback, enabled ? 'Публикация включена' : 'Публикация отключена')
+  if enabled && consent_request
+    video_feed.controls_for_consent(consent_request).each { |job| refresh_video_feed_control(bot.api, job) }
+  end
   text = enabled ? (consent_request ? 'Согласие принято для ссылок без знака из этого сообщения и следующих роликов. Успешно загруженные видео попадут в Побочку без повторной отправки ссылки, если их ещё нет в ленте. Ссылки с «-» не публикуются.' :
     'Новые видео будут публиковаться анонимно в Побочке. Старую историю не публикуем.') :
     "Автопубликация твоих видео отключена и в личке, и в группах. Отменено ожидающих публикаций: #{count}. Уже вышедшие посты не удалены. Для разовой публикации можно прислать «+ ссылка», не меняя эту настройку."
@@ -635,3 +652,5 @@ rescue => e
   safe_send_message(bot, message.chat.id, 'Не удалось проверить права или выполнить команду ленты. Попробуй позже.')
   true
 end
+
+require_relative 'video_feed_controls'

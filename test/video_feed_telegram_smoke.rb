@@ -72,7 +72,20 @@ class UploadApi
     media.each_index.map { |index| response(202 + index) }
   end
 
-  def send_message(**_params); end
+  def send_message(**params)
+    return typed_message(399, text: params[:text]) unless params[:reply_markup]
+
+    @control_count = @control_count.to_i + 1
+    Telegram::Bot::Types::InlineKeyboardMarkup.new(JSON.parse(params[:reply_markup], symbolize_names: true)) if params[:reply_markup]
+    check(params[:disable_notification] == true, 'Album control is not silent')
+    check(JSON.parse(params[:reply_parameters])['message_id'] >= 202, 'Album control lost its video reply target')
+    typed_message(300 + @control_count, text: params[:text], chat: { id: params[:chat_id], type: 'private' })
+  end
+
+  def edit_message_caption(**params)
+    Telegram::Bot::Types::InlineKeyboardMarkup.new(JSON.parse(params[:reply_markup], symbolize_names: true))
+    typed_message(params[:message_id], caption: params[:caption])
+  end
 
   def response(id)
     Telegram::Bot::Types::Message.new(message_id: id, date: Time.now.to_i,
@@ -111,6 +124,17 @@ stubs = Faraday::Adapter::Test::Stubs.new do |stub|
   stub.post('/bot000:feed-tests/deleteMessage') do |env|
     requests << [:delete, URI.decode_www_form(env.body).to_h]
     [200, {}, JSON.generate(ok: true, result: true)]
+  end
+  %w[editMessageCaption editMessageText].each do |endpoint|
+    stub.post("/bot000:feed-tests/#{endpoint}") do |env|
+      params = URI.decode_www_form(env.body).to_h
+      requests << [:control_edit, params]
+      Telegram::Bot::Types::InlineKeyboardMarkup.new(JSON.parse(params.fetch('reply_markup'), symbolize_names: true))
+      attributes = {}
+      attributes[:caption] = params['caption'] if params['caption']
+      attributes[:text] = params['text'] if params['text']
+      [200, {}, JSON.generate(ok: true, result: typed_message(params.fetch('message_id').to_i, **attributes).to_h)]
+    end
   end
 end
 api = Telegram::Bot::Api.new('000:feed-tests')
@@ -185,7 +209,8 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
   Dir.chdir(dir) do
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: items)
     jobs = JSON.parse(File.read('choices.json'))['jobs']
-    check(jobs.map { |job| [job['file_id'], job['status']] } == [['upload203', 'queued'], ['upload204', 'awaiting_consent']], 'Minus/plus got misaligned after failed download or album upload')
+    check(jobs.map { |job| [job['file_id'], job['status']] } == [['upload202', 'awaiting_choice'], ['upload203', 'queued'], ['upload204', 'awaiting_consent'], ['upload205', 'awaiting_choice']], 'Minus/plus got misaligned after failed download or album upload')
+    check(jobs.all? { |job| job['control_kind'] == 'text' && job['control_message_id'] >= 301 }, 'Album controls were not bound to separate reply cards')
     context = items.find { |item| item[:feed_choice] == :default }[:feed_context]
     @video_feed.set_preference('user:10', enabled: true, consent_request: context[:consent_request])
     check(@video_feed.stats['queued'] == 2, 'Generic consent released a minus-marked video')
@@ -194,6 +219,11 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
     process_media_job(upload_bot, type: :video_link_batch, chat_id: 10, items: plus)
     check(@video_feed.stats['queued'] == 1 && @video_feed.preference('user:10') == 'off', 'One-off private plus lost authorization or changed defaults')
     check(@video_feed.process_next, 'Publisher ignored a plus while general publication was off')
+    cancelled = jobs.first
+    callback = Telegram::Bot::Types::CallbackQuery.new(id: 'video-choice', chat_instance: 'test', from: typed_message(1).from,
+      message: typed_message(cancelled['control_message_id']), data: "feed_item:skip:#{cancelled['id']}")
+    check(handle_video_feed_control_callback(bot, callback), 'Actual per-video callback was not handled')
+    check(@video_feed.control_snapshot(cancelled['id'])['status'] == 'opted_out', 'Actual skip callback failed to persist cancellation')
   end
   %w[ru en].each { |language| check(onboarding_instructions(language, 'test_bot').length <= 4096, 'Help exceeds limit') }
 end

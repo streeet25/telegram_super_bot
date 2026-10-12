@@ -108,7 +108,7 @@ def recent_sent_videos(chat_id, count)
   MEDIA_HISTORY_MUTEX.synchronize { Array(load_media_history[chat_id.to_s]).last(count) }
 end
 
-def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context: nil, source_link: nil)
+def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context: nil, source_link: nil, feed_control: nil)
   return unless video_path && File.exist?(video_path)
 
   file_size_mb = (File.size(video_path).to_f / 1024 / 1024).round(1)
@@ -120,10 +120,14 @@ def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context
     supports_streaming: true
   }.merge(metadata)
 
-  feed_keys = feed_context ? video_feed_keys(source_link, video_path) : []
+  feed_keys = (feed_context || feed_control) ? video_feed_keys(source_link, video_path) : []
   response = bot.api.send_video(**params)
   record_sent_videos(chat_id, response, sources: [source_name])
-  if feed_context
+  if feed_control
+    visuals = video_feed_visuals([video_path], submitter: feed_control[:submitter], one_off: true)
+    attach_video_feed_control(bot, response, control: feed_control, context: feed_context,
+                             keys: feed_keys, visual: visuals.first, caption: caption)
+  elsif feed_context
     visuals = video_feed_visuals([video_path], submitter: feed_context[:submitter], one_off: feed_context[:one_off])
     enqueue_video_feed(response, **feed_context, keys: [feed_keys], visuals: visuals)
   end
@@ -166,15 +170,21 @@ def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
     )
   end
   contexts = videos.map { |video| video.fetch(:feed_context, feed_context) }
-  feed_keys = videos.each_with_index.map { |video, i| contexts[i] ? video_feed_keys(video[:link], video[:path]) : [] }
+  controls = videos.map { |video| video[:feed_control] }
+  feed_keys = videos.each_with_index.map { |video, i| (contexts[i] || controls[i]) ? video_feed_keys(video[:link], video[:path]) : [] }
   response = bot.api.send_media_group(chat_id: chat_id, media: JSON.generate(media), **uploads)
   record_sent_videos(chat_id, response, sources: videos.map { |video| video[:source] })
-  eligible = contexts.each_index.select { |i| contexts[i] }
+  eligible = contexts.each_index.select { |i| contexts[i] || controls[i] }
   unless eligible.empty?
-    visuals = video_feed_visuals(eligible.map { |i| videos[i][:path] }, submitter: contexts[eligible.first][:submitter],
-                                one_off: eligible.any? { |i| contexts[i][:one_off] })
+    visuals = video_feed_visuals(eligible.map { |i| videos[i][:path] }, submitter: (controls[eligible.first] || contexts[eligible.first])[:submitter],
+                                one_off: eligible.any? { |i| controls[i] || contexts[i][:one_off] })
     eligible.each_with_index do |i, visual_index|
-      enqueue_video_feed(Array(response)[i], **contexts[i], keys: [feed_keys[i]], visuals: [visuals[visual_index]])
+      if controls[i]
+        attach_video_feed_control(bot, Array(response)[i], control: controls[i], context: contexts[i], keys: feed_keys[i],
+                                 visual: visuals[visual_index], caption: "Видео #{i + 1} из подборки", album: true)
+      else
+        enqueue_video_feed(Array(response)[i], **contexts[i], keys: [feed_keys[i]], visuals: [visuals[visual_index]])
+      end
     end
   end
   response
@@ -202,6 +212,7 @@ def process_video_link_batch(bot, chat_id, items, feed_context: nil)
     video = download_video_item(item)
     if video
       video[:feed_context] = item.fetch(:feed_context, feed_context)
+      video[:feed_control] = item[:feed_control]
       result << video
     end
   rescue MediaWithoutVideo => e
@@ -217,7 +228,7 @@ def process_video_link_batch(bot, chat_id, items, feed_context: nil)
 
   if downloaded.one?
     video = downloaded.first
-    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: video[:feed_context], source_link: video[:link])
+    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: video[:feed_context], source_link: video[:link], feed_control: video[:feed_control])
   else
     send_video_album(bot, chat_id, downloaded, caption: "Подборка из #{downloaded.size} видео", feed_context: feed_context)
   end

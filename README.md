@@ -157,6 +157,33 @@ content exclusions and deduplication apply to `+` too. Pressing the global off
 button again cancels queued one-off publications and invalidates their in-flight
 download permissions, even if the general setting was already off.
 
+Newly downloaded videos also offer **В Побочку** / **Не публиковать** buttons.
+Single-video controls are attached to the video's caption. Since `sendMediaGroup`
+has no keyboard parameter, each album item gets a silent reply linked to that
+specific video. The sender, source chat and exact control-message ID are checked
+on every callback; forwarded/copied buttons and other group members cannot act.
+Controls expire after 24 hours and never change the user's general preference.
+
+Eligible **unmarked** links wait 30 seconds after Telegram confirms that the
+controls are attached, or a fresh 30 seconds after private consent if later.
+If no button is pressed, existing publication/consent settings apply. `+` still
+publishes immediately; `-` and opted-out/private clips never auto-publish, but
+the sender can later explicitly authorize that one clip with the publish button.
+Publish accelerates a pending timer; cancel removes only that clip from the
+unpublished queue, including pending generic consent. Repeated clicks are safe.
+The publication gate serializes cancel/send races. Sent or uncertain deliveries
+are never deleted or resent by these buttons; the UI reports their actual state.
+Keyboard attachment failure suppresses automatic unmarked publication rather than
+starting a timer without a visible cancel button. Original video delivery still
+works. Old downloads are not backfilled with controls. No update broadcast runs
+on startup or deployment.
+
+Control records live in the same private state file, including source chat/message
+IDs, file IDs, fingerprints and short bot-authored labels. Unpublished/unapproved
+controls do not seed the public deduplication index; expired private/cancelled
+controls are removed. Published history remains durable. At most 1,000 unexpired
+control records are retained, and the existing pending-publication cap applies.
+
 Moderation commands work only in private chat. Each command rechecks that the
 caller is the channel owner or an administrator with delete permission:
 
@@ -225,6 +252,7 @@ Tests (the smoke scripts use a network-disabled Faraday test adapter):
 
 ```sh
 ruby test/video_feed_test.rb
+ruby test/video_feed_controls_test.rb
 ruby test/video_link_choices_test.rb
 ruby test/link_controls_announcement_test.rb
 ruby test/video_fingerprint_test.rb # Includes generated ffmpeg fixtures; no network.

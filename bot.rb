@@ -47,6 +47,7 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
   bot.listen do |message|
     begin
       if message.is_a?(Telegram::Bot::Types::CallbackQuery)
+        next if handle_video_feed_control_callback(bot, message)
         next if handle_video_feed_privacy_callback(bot, message)
         next if handle_language_callback(bot, message, bot_username)
         next

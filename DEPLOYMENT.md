@@ -8,7 +8,7 @@ The production bot runs on `root@5.61.91.77` in the Docker container
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The per-link publication release validated on 2026-10-09 is `videomorph:link-controls-20261009` (`sha256:28aae1814608ed7b361128b4807be32c238f978d1cffa5ceb2461e5e8f3ce973`). The previous image `videomorph:visual-20261008` (`sha256:690cfb33457f6f81fbae3aa30309b632e1cd17558449344ce21066c8b0323b98`) is retained for rollback.
+- The launcher pins the Docker image by digest. The per-video buttons release validated on 2026-10-12 is `videomorph:buttons-20261012` (`sha256:fedb821a76a1227d5b4699248af9d8db077354194704ed72152eadbd73be435f`). The previous image `videomorph:link-controls-20261009` (`sha256:28aae1814608ed7b361128b4807be32c238f978d1cffa5ceb2461e5e8f3ce973`) is retained for rollback; see the unpublished-control migration below before starting a pre-button image.
 
 Use `systemctl restart videomorph.service` to restart production. Do not manage the
 container lifecycle directly: the launcher uses `docker run --rm`, and systemd
@@ -55,6 +55,17 @@ Per-link `+` permissions persist as `one_off` with a privacy revision; an absent
 field preserves the old default behavior. `-` items have no feed context and are
 never queued. A new explicit global off revokes pending one-off permissions,
 even when the default was already off. No deployment changes existing choices.
+
+Per-video button records use optional `control_*` fields on feed jobs. Unmarked
+auto-publications start their 30-second window only after control attachment is
+confirmed; `control_ready: false` fails closed after an interrupted attachment.
+Preserve all fields on restart. `awaiting_choice` records are private, expire in
+24 hours and are excluded from public deduplication. Existing state/history is
+not backfilled. No announcement command is part of this release or its startup.
+For rollback to a pre-button image, stop the service and conservatively change
+unpublished control jobs (`queued`, `failed`, `awaiting_consent`, `awaiting_choice`)
+to `opted_out` before starting the old image: it does not understand the new
+attachment gate. Keep sent/uncertain history, preferences, bans and receipts.
 
 The user-authorized private link-control announcement is an explicit maintenance
 command, not part of startup: from `/var/lib/videomorph`, run

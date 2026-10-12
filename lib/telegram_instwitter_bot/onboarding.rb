@@ -112,6 +112,8 @@ def onboarding_instructions(language, bot_username)
 
       For one video: + LINK publishes it anonymously in ПОБОЧКА, even if your general setting is off. - LINK downloads it without publication. No sign uses your current setting. Put a sign before each link on the same line; this never changes your setting for future videos. Bans and duplicate protection still apply.
 
+      Each new downloaded video has «В Побочку» (publish this one) and «Не публиковать» (cancel this one) buttons; albums get a silent reply per video. Only the sender can use them, for 24 hours. Unmarked links eligible for publication wait 30 seconds after the buttons appear (or after consent). No click means your current setting applies. + and - keep their previous behavior. Already published posts cannot be removed with these buttons.
+
       Command: I am in Belgium
       What it does: saves your location for time conversion and reminders.
       Example: I am in Kyiv
@@ -174,6 +176,8 @@ def onboarding_instructions(language, bot_username)
       Команды:
 
       Для одного видео: + ССЫЛКА — анонимно опубликовать в ПОБОЧКЕ, даже при отключённой общей публикации. - ССЫЛКА — скачать без публикации. Без знака — по текущей настройке. Знак ставь перед каждой ссылкой на той же строке; настройка для следующих видео не меняется. Баны и защита от повторов действуют.
+
+      У новых скачанных видео есть кнопки «В Побочку» и «Не публиковать»; для альбома — тихий ответ к каждому ролику. Нажимать может только отправитель, в течение 24 часов. Ссылки без знака, разрешённые к публикации, ждут 30 секунд после появления кнопок (или согласия). Без нажатия действует текущая настройка. + и - работают как раньше. Уже опубликованное эти кнопки не удаляют.
 
       Команда: я нахожусь в Бельгии
       Что делает: сохраняет ваше местоположение для конвертации времени и напоминаний.
