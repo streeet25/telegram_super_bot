@@ -162,7 +162,12 @@ button again cancels queued one-off publications and invalidates their in-flight
 download permissions, even if the general setting was already off.
 
 Newly downloaded videos also offer **В Побочку** / **Не публиковать** buttons.
-Single-video controls are attached to the video's caption. Since `sendMediaGroup`
+Single-video controls are attached as an inline keyboard; the original video
+caption never includes feed publication status, so forwarding the video does not
+copy the service-status sentence. Status remains available through the keyboard
+and callback toast. Refreshing a still-valid older control also restores its
+saved original caption, but there is no automatic bulk edit of old messages.
+Since `sendMediaGroup`
 has no keyboard parameter, each album item gets a silent reply linked to that
 specific video. The sender, source chat and exact control-message ID are checked
 on every callback; forwarded/copied buttons and other group members cannot act.

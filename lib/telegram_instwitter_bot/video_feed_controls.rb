@@ -148,13 +148,25 @@ end
 def refresh_video_feed_control(api, job)
   params = { chat_id: job['control_chat_id'], message_id: job['control_message_id'],
              reply_markup: video_feed_control_markup(job) }
-  body = "#{job['control_caption']}\n\n#{video_feed_control_text(job)}"
   if job['control_kind'] == 'text'
-    api.edit_message_text(**params, text: body)
+    api.edit_message_text(**params, text: "#{job['control_caption']}\n\n#{video_feed_control_text(job)}")
   else
-    api.edit_message_caption(**params, caption: body)
+    # The caption travels with forwarded video. Keep status in the keyboard
+    # and callback response, never in the media's original caption. This also
+    # cleans an older status suffix when its control is next refreshed.
+    api.edit_message_caption(**params, caption: job['control_caption'].to_s)
   end
 rescue => e
+  # Cancelling or checking status can leave both caption and buttons unchanged.
+  response = begin
+    e.respond_to?(:data) ? e.data : nil
+  rescue
+    nil
+  end
+  if response.is_a?(Hash) && (response['error_code'] || response[:error_code]).to_i == 400 &&
+     (response['description'] || response[:description]).to_s.downcase.include?('message is not modified')
+    return
+  end
   # UI failure must never change a confirmed Telegram publication outcome.
   puts "Video feed control refresh error: #{e.class}"
 end
@@ -185,7 +197,7 @@ def attach_video_feed_control(bot, message, control:, context:, keys:, visual:, 
     # Unlike refresh, attachment must propagate failure: don't start the timer
     # when Telegram did not confirm that the user can see the cancel button.
     bot.api.edit_message_caption(chat_id: message.chat.id, message_id: message.message_id,
-                                 caption: "#{caption}\n\n#{video_feed_control_text(job)}", reply_markup: video_feed_control_markup(job))
+                                 caption: caption.to_s, reply_markup: video_feed_control_markup(job))
     latest = video_feed.activate_control(job['id'], message_id: message.message_id, kind: 'video')
   end
   refresh_video_feed_control(bot.api, latest) if latest && latest['status'] != job['status']

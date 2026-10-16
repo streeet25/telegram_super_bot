@@ -88,6 +88,7 @@ class UploadApi
   end
 
   def edit_message_caption(**params)
+    check(!params[:caption].include?('ПОБОЧКА:'), 'Service status leaked into forwarded video caption')
     Telegram::Bot::Types::InlineKeyboardMarkup.new(JSON.parse(params[:reply_markup], symbolize_names: true))
     typed_message(params[:message_id], caption: params[:caption])
   end
@@ -101,6 +102,7 @@ end
 
 requests = []
 fail_next = false
+unchanged_next = false
 stubs = Faraday::Adapter::Test::Stubs.new do |stub|
   stub.post('/bot000:feed-tests/sendVideo') do |env|
     params = URI.decode_www_form(env.body).to_h
@@ -134,7 +136,12 @@ stubs = Faraday::Adapter::Test::Stubs.new do |stub|
     stub.post("/bot000:feed-tests/#{endpoint}") do |env|
       params = URI.decode_www_form(env.body).to_h
       requests << [:control_edit, params]
+      check(!params.fetch('caption', '').include?('ПОБОЧКА:'), 'Refreshed caption contains service status')
       Telegram::Bot::Types::InlineKeyboardMarkup.new(JSON.parse(params.fetch('reply_markup'), symbolize_names: true))
+      if unchanged_next
+        unchanged_next = false
+        next [400, {}, JSON.generate(ok: false, error_code: 400, description: 'Bad Request: message is not modified')]
+      end
       attributes = {}
       attributes[:caption] = params['caption'] if params['caption']
       attributes[:text] = params['text'] if params['text']
@@ -230,6 +237,10 @@ Dir.mktmpdir('feed-telegram-smoke-') do |dir|
       message: typed_message(cancelled['control_message_id']), data: "feed_item:skip:#{cancelled['id']}")
     check(handle_video_feed_control_callback(bot, callback), 'Actual per-video callback was not handled')
     check(@video_feed.control_snapshot(cancelled['id'])['status'] == 'opted_out', 'Actual skip callback failed to persist cancellation')
+    # A no-op edit must be harmless with the gem's actual ResponseError type.
+    unchanged_next = true
+    refresh_video_feed_control(api, @video_feed.control_snapshot(cancelled['id']))
+    check(!unchanged_next, 'No-op Telegram response was not exercised')
   end
   %w[ru en].each { |language| check(onboarding_instructions(language, 'test_bot').length <= 4096, 'Help exceeds limit') }
 end

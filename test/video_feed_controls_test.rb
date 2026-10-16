@@ -18,6 +18,7 @@ class VideoFeedControlsTest < Minitest::Test
       OpenStruct.new(message_id: @calls.size)
     end
     def edit_message_caption(**params)
+      raise fail_edit if fail_edit.is_a?(Exception)
       raise 'UI failed' if fail_edit
       @calls << [:caption, params]
       true
@@ -73,7 +74,8 @@ class VideoFeedControlsTest < Minitest::Test
     @now += 1
     assert @video_feed.process_next
     assert_equal 1, @api.calls.count { |name, _| name == :video }
-    assert_includes @api.calls.last[1][:caption], 'уже опубликовано'
+    assert_equal 'Видео', @api.calls.last[1][:caption]
+    assert_equal 'Уже в Побочке', JSON.parse(@api.calls.last[1][:reply_markup])['inline_keyboard'][0][0]['text']
   end
 
   def test_default_private_opt_out_does_not_auto_publish_but_button_is_one_off_consent
@@ -188,6 +190,57 @@ class VideoFeedControlsTest < Minitest::Test
     assert_equal 1, @video_feed.stats['queued']
   end
 
+  def test_initial_video_buttons_do_not_add_status_to_caption
+    caption = "Исходная подпись\nс переносом строки"
+    message = OpenStruct.new(message_id: 4, chat: OpenStruct.new(id: -20),
+                             video: OpenStruct.new(file_id: 'file', file_unique_id: 'unique'))
+    attach_video_feed_control(@bot, message, control: { submitter: 'user:10', chat_id: -20, choice: :default },
+                              context: @video_feed.submission_context('user:10', private_chat: false),
+                              keys: ['key'], visual: nil, caption: caption)
+    assert_equal [:caption], @api.calls.map(&:first)
+    params = @api.calls.last[1]
+    assert_equal caption, params[:caption]
+    buttons = JSON.parse(params[:reply_markup])['inline_keyboard'][0]
+    assert_equal ['В Побочку', 'Не публиковать'], buttons.map { |button| button['text'] }
+    token = buttons.first['callback_data'].split(':').last
+    assert_equal @now + 30, @video_feed.control_snapshot(token)['next_at']
+  end
+
+  def test_every_publication_state_preserves_only_original_video_caption
+    job = register
+    statuses = %w[queued sent duplicate uncertain sending deleted deleting delete_pending delete_failed blocked failed awaiting_choice awaiting_consent opted_out]
+    ['Видео из Threads', nil].each do |caption|
+      statuses.each do |status|
+        refresh_video_feed_control(@api, job.merge('status' => status, 'control_caption' => caption))
+        assert_equal :caption, @api.calls.last[0]
+        assert_equal caption.to_s, @api.calls.last[1][:caption], status
+        refute_empty JSON.parse(@api.calls.last[1][:reply_markup])['inline_keyboard']
+      end
+    end
+  end
+
+  def test_album_status_stays_in_separate_reply_not_media_caption
+    job = register.merge('control_kind' => 'text', 'control_message_id' => 900, 'status' => 'sent')
+    refresh_video_feed_control(@api, job)
+    assert_equal :text, @api.calls.last[0]
+    assert_equal 900, @api.calls.last[1][:message_id]
+    assert_includes @api.calls.last[1][:text], 'ПОБОЧКА: уже опубликовано'
+    refute @api.calls.any? { |name, _| name == :caption }
+  end
+
+  def test_no_op_edit_is_benign_but_other_errors_remain_visible
+    error_class = Class.new(StandardError) do
+      attr_reader :data
+      def initialize(data); @data = data; end
+    end
+    job = register
+    @api.fail_edit = error_class.new('error_code' => 400, 'description' => 'Bad Request: message is not modified')
+    assert_output('') { refresh_video_feed_control(@api, job) }
+    @api.fail_edit = error_class.new('error_code' => 403, 'description' => 'Forbidden')
+    assert_output(/Video feed control refresh error/) { refresh_video_feed_control(@api, job) }
+    assert_equal 'queued', @video_feed.control_snapshot(job['id'])['status']
+  end
+
   def test_album_controls_reply_silently_to_the_exact_video_and_bind_reply_id
     message = OpenStruct.new(message_id: 4, message_thread_id: 8, chat: OpenStruct.new(id: -20),
                              video: OpenStruct.new(file_id: 'file', file_unique_id: 'unique'))
@@ -211,6 +264,8 @@ class VideoFeedControlsTest < Minitest::Test
     assert handle_video_feed_control_callback(@bot, callback)
     assert_equal 'opted_out', @video_feed.control_snapshot(job['id'])['status']
     assert_equal [:answer, :caption], @api.calls.map(&:first)
+    assert_includes @api.calls.first[1][:text], 'не публикуется'
+    assert_equal 'Видео', @api.calls.last[1][:caption]
     assert_operator callback.data.bytesize, :<=, 64
   end
 

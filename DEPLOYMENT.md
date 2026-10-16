@@ -8,7 +8,14 @@ The production bot runs on `root@5.61.91.77` in the Docker container
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The Threads release validated on 2026-10-12 is `videomorph:threads-20261012` (`sha256:3dd364279f2704e8c6f2c3e61401a449652774b995f8f4bc30b670476d25ba97`). The previous image `videomorph:buttons-20261012` (`sha256:fedb821a76a1227d5b4699248af9d8db077354194704ed72152eadbd73be435f`) is retained for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+- The launcher pins the Docker image by digest. The clean-caption release validated on 2026-10-16 is `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`). The previous image `videomorph:threads-20261012` (`sha256:3dd364279f2704e8c6f2c3e61401a449652774b995f8f4bc30b670476d25ba97`) is retained for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+
+The clean-caption release no longer appends publication status to video captions,
+including after publication, cancellation, consent or a duplicate result. Controls
+and callback feedback remain; album status stays in separate reply messages.
+Telegram's HTTP 400 "message is not modified" during refresh is a harmless no-op;
+other UI failures remain logged. Existing captions are cleaned only when their
+controls are refreshed, with no startup history sweep, data migration or broadcast.
 
 The Threads release adds `/opt/app/ytdlp_plugins/videomorph/yt_dlp_plugins/extractor/videomorph_threads.py`.
 Preserve this directory in the image, not just Ruby files. Only Threads calls enable
