@@ -370,17 +370,26 @@ def validate_ytdlp_media_info!(info)
   puts message
 end
 
-def default_ytdlp_formats
+def ytdlp_video_format(max_height: nil)
+  height = max_height ? "[height<=#{max_height}]" : ''
+  # `best` normally selects a pre-muxed video+audio file. Some sites offer only
+  # separate tracks. Merge those before falling back to genuinely silent video.
+  # Exclude audio-only files even when yt-dlp relaxes `best` for incomplete formats.
   [
-    "best[height<=720][ext=mp4]/best[height<=720]",
-    "best[height<=480][ext=mp4]/best[height<=480]",
-    "best[height<=360][ext=mp4]/best[height<=360]",
-    "best[ext=mp4]/best"
-  ]
+    "best#{height}[ext=mp4][vcodec!=none]",
+    "bestvideo#{height}[ext=mp4]+bestaudio[ext=m4a]",
+    "best#{height}[vcodec!=none]",
+    "bestvideo#{height}+bestaudio",
+    "bestvideo#{height}"
+  ].join('/')
+end
+
+def default_ytdlp_formats
+  [720, 480, 360, nil].map { |height| ytdlp_video_format(max_height: height) }
 end
 
 def instagram_ytdlp_formats
-  best_mp4 = "best[ext=mp4]/best"
+  best_mp4 = ytdlp_video_format
   [best_mp4, *default_ytdlp_formats.reject { |format| format == best_mp4 }]
 end
 

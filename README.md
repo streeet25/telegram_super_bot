@@ -111,6 +111,22 @@ Plain Twitter/X, Instagram, Threads, and YouTube Shorts links are processed as v
 
 Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (the latter needs the same Python environment as yt-dlp) for offline Threads coverage, plus the existing feed and native Telegram smoke tests. Live verification should call the downloader without sending messages or publishing to the channel.
 
+### Video format selection
+
+The shared downloader prefers combined MP4 files, then merges separate video and
+audio tracks with ffmpeg. It can also download genuinely silent videos, but never
+selects an audio-only format. Height/size/time limits and the first-video-only rule
+are unchanged. Instagram still prefers original resolution; `YTDLP_FORMAT` still
+overrides the built-in selectors. Threads retains its own progressive selector.
+
+Run `ruby test/ytdlp_download_test.rb` for command/limit coverage and
+`python3 test/ytdlp_formats_test.py` in yt-dlp's Python environment for actual
+format selection, including an old-selector regression fixture.
+`python3 test/ytdlp_merge_smoke.py` exercises the Ruby downloader, real yt-dlp and
+ffmpeg with local video/audio fixtures. It needs the application's gems and
+Bundler 2.6.7, uses loopback HTTP only, and can run with Docker `--network none`.
+These tests do not need cookies, a real Telegram token, or production state.
+
 ### Anonymous video feed (ПОБОЧКА)
 
 Set `VIDEO_FEED_CHANNEL=@pobo4ka_ink` to enable; leave empty to disable. The bot

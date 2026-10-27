@@ -1,7 +1,36 @@
 # Production deployment
 
-The production bot runs on `root@5.61.91.77` in the Docker container
-`videomorph-production`.
+The last validated production deployment was on `root@5.61.91.77` in the Docker
+container `videomorph-production`.
+
+**Status checked 2026-10-27:** `videomorph.service` is inactive and disabled on
+that host, the production container is absent, and no recent service logs were
+available. The current live bot's host is unconfirmed. Do not start this old
+service until the active deployment and polling ownership are established.
+The paths and release information below describe the last validated deployment,
+not confirmation that the bot is currently running there.
+
+## Prepared format fix — not deployed
+
+On 2026-10-27, an offline candidate was built on that host as
+`videomorph:formats-ytdlp20261026-candidate-20261027`, digest
+`sha256:426fa440f1da722384b4859fd89ba98aed4cbf3b5039964511b04a5ec0b1318f`.
+It contains the shared format-selector fix and
+[`yt-dlp[default]==2026.10.26`](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26),
+upgraded from 2026.08.19; the image still runs as `10001:10001`.
+The complete offline suite passed against both yt-dlp versions: 162 Ruby tests,
+18 Python tests, two native Telegram serialization smokes and one real
+yt-dlp/ffmpeg merge smoke, all without network access or production state.
+
+The regression reproduces failure of the old selectors when only separate video
+and audio tracks exist. The corrected selectors merge both into MP4 and reject
+audio-only formats, following the official
+[format-selection rules](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/README.md#format-selection).
+The user's specific failing URL has not been supplied or verified. No live
+service, launcher, cookies or state were changed. Confirm the active host and
+download that URL without Telegram sends before rolling out this candidate.
+
+## Last validated runtime
 
 - Application code inside the container: `/opt/app`
 - Persistent bot state: `/var/lib/videomorph` on the host, mounted at the same path
@@ -27,7 +56,8 @@ The supplied `katia_lok/DeWshaKHBhY` post downloaded as a 12-second 720×1280 MP
 in the candidate without Telegram sends. No data migration or announcement is
 part of this release; preserve all existing state, privacy settings and receipts.
 
-Use `systemctl restart videomorph.service` to restart production. Do not manage the
+Once the active production host and polling ownership are confirmed, use
+`systemctl restart videomorph.service` to restart production. Do not manage the
 container lifecycle directly: the launcher uses `docker run --rm`, and systemd
 may recreate a stopped container. Changes copied into a running container are not
 persistent; deploy a validated image and update the launcher's pinned digest.
