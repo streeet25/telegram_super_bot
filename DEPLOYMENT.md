@@ -1,18 +1,18 @@
 # Production deployment
 
-The last validated production deployment was on `root@5.61.91.77` in the Docker
-container `videomorph-production`.
+The production bot is on `root@2.24.29.59` in the Docker container
+`videomorph-production`. The host was supplied by the owner and verified on
+2026-11-01: `videomorph.service` is enabled/running and Telegram `getMe` confirms
+`VideoMorph_bot`. The running image is still the clean-caption release below;
+the prepared format fix has not been deployed.
 
-**Status checked 2026-10-27:** `videomorph.service` is inactive and disabled on
-that host, the production container is absent, and no recent service logs were
-available. The current live bot's host is unconfirmed. Do not start this old
-service until the active deployment and polling ownership are established.
-The paths and release information below describe the last validated deployment,
-not confirmation that the bot is currently running there.
+The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
+inactive/disabled, with no bot container or `bot.rb` process. Do not start that
+retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
 ## Prepared format fix — not deployed
 
-On 2026-10-27, an offline candidate was built on that host as
+On 2026-10-27, an offline candidate was built on the old host `5.61.91.77` as
 `videomorph:formats-ytdlp20261026-candidate-20261027`, digest
 `sha256:426fa440f1da722384b4859fd89ba98aed4cbf3b5039964511b04a5ec0b1318f`.
 It contains the shared format-selector fix and
@@ -26,11 +26,12 @@ The regression reproduces failure of the old selectors when only separate video
 and audio tracks exist. The corrected selectors merge both into MP4 and reject
 audio-only formats, following the official
 [format-selection rules](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/README.md#format-selection).
-The user's specific failing URL has not been supplied or verified. No live
-service, launcher, cookies or state were changed. Confirm the active host and
-download that URL without Telegram sends before rolling out this candidate.
+The user's specific URL for the 2026-10-27 format error has not been supplied or
+verified. That preparation did not change any live service, launcher, cookies or
+state. Download the failing URL without Telegram sends before rolling out this
+candidate to the now-confirmed active host.
 
-## Last validated runtime
+## Verified active runtime
 
 - Application code inside the container: `/opt/app`
 - Persistent bot state: `/var/lib/videomorph` on the host, mounted at the same path
@@ -136,6 +137,22 @@ the same directory with the permissions above, then start the service. Instagram
 cookie backups are stored in `/etc/videomorph/cookie-backups` on the host. Verify
 an actual download through the application's downloader, without sending test
 messages to user chats.
+
+The 2026-11-01 Instagram cookie rotation was applied on `2.24.29.59`: eight new
+Instagram cookies (including `sessionid`) replaced six old Instagram entries;
+all 101 non-Instagram cookie rows were preserved byte-for-byte during the update.
+The runtime file remains `0600`, owned by `10001:10001`. The root-only backup is
+`/etc/videomorph/cookie-backups/cookies-before-instagram-20261031T222522Z-a24322.txt`
+(the filename uses UTC). The service was stopped only for the atomic replacement
+and then started; `getMe` and active/running status were verified. No code/image,
+feed preferences, or state were changed, and temporary credential copies were
+removed locally and remotely.
+
+A download-only verification through the running image's Ruby downloader, using
+a private temporary cookie copy, succeeded for Instagram `Db8NHvWo46E`: 41 seconds,
+720x1280, 7,690,375 bytes, Telegram-ready MP4. No Telegram messages were sent.
+The older `DecRcFkx6hh` link still returned HTTP 400 during metadata extraction;
+that individual link is not claimed fixed by this credential update.
 
 Never store the bot token, API credentials, or cookies in this repository. Preserve the
 container environment and both mounts whenever replacing the production container.
