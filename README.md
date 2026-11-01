@@ -136,6 +136,17 @@ Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (th
 
 ### Video format selection
 
+Public Telegram uploads are capped at 49 MiB, leaving headroom below the documented
+[50 MB limit](https://core.telegram.org/bots/api#sending-files). This also clamps
+legacy `YTDLP_MAX_FILESIZE_MB=96` and disabled/invalid values; smaller positive
+limits are preserved. Source download limits are separate. Oversized videos are
+compressed before upload. An explicit Telegram/HTTP 413 triggers at most one
+additional, smaller encode and retry for a single video or GIF; timeouts and
+other errors do not retry an upload that might already have been delivered.
+History, feed controls and publication are created only after confirmed delivery.
+Repeated size rejection or failed compression returns a short explanation, not
+the raw API error. Albums are not blindly retried or split after rejection.
+
 Instagram first probes and downloads without account cookies, ignoring external
 yt-dlp configuration and browser cookies. If extraction/download fails, it retries
 once with the configured `YTDLP_COOKIES_FILE` or `YTDLP_COOKIES_FROM_BROWSER`.
@@ -398,7 +409,7 @@ requests or messages to real chats.
 | `MAX_MEDIA_HISTORY_PER_CHAT` | `50` | Number of bot-sent videos remembered per chat for the “recent videos” command. |
 | `MEDIA_QUEUE_SIZE` | `4` | Maximum queued media jobs. |
 | `MEDIA_WORKER_COUNT` | `1` | Number of media worker threads, capped at `4`. |
-| `YTDLP_MAX_FILESIZE_MB` | `96` | Maximum final media file size sent to Telegram after compression. If public Bot API uploads reject files near this size, lower it or use a local Bot API server. Set `0` to disable the upload size cap. |
+| `YTDLP_MAX_FILESIZE_MB` | `49` | Maximum final media size after compression, capped at 49 MiB for the public Bot API. Smaller positive values are respected; `0`, invalid and larger values use the safe 49 MiB ceiling. Does not change the separate source-download limit. |
 | `YTDLP_MAX_DOWNLOAD_FILESIZE_MB` | `150` | Maximum source media file size downloaded before compression. With `ffmpeg`, temporary download directories may use up to twice this size during merges. Set `0` to disable the download size cap. |
 | `YTDLP_MAX_DURATION_SECONDS` | `600` | Maximum video duration. Set `0` to disable the duration cap. |
 | `YTDLP_PROBE_TIMEOUT_SECONDS` | `20` | Timeout for metadata probing. |

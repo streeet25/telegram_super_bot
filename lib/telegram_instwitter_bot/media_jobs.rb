@@ -1,6 +1,50 @@
 # frozen_string_literal: true
 
 require_relative 'threads'
+require_relative 'media_limits'
+require_relative 'media_errors'
+
+def telegram_upload_too_large?(error)
+  data = error.respond_to?(:data) ? error.data : nil
+  return true if data.is_a?(Hash) && (data['error_code'] || data[:error_code]).to_i == 413
+
+  response = error.respond_to?(:response) ? error.response : nil
+  response.is_a?(Hash) && (response[:status] || response['status']).to_i == 413
+end
+
+def telegram_upload_failure_message(error, prefix: 'Ошибка при отправке видео')
+  return error.message if error.is_a?(MediaDownloadBlocked)
+  return 'Telegram не принял размер файла даже после сжатия. Попробуй более короткий ролик.' if telegram_upload_too_large?(error)
+
+  "#{prefix}: #{error.message}"
+end
+
+def with_telegram_upload_size_retry(path)
+  configured_limit = defined?(YTDLP_MAX_FILESIZE_BYTES) ? YTDLP_MAX_FILESIZE_BYTES : nil
+  limit = TelegramMediaLimits.upload_bytes(configured_limit)
+  if File.size(path) > limit
+    path = prepare_video_for_telegram(path, limit)
+    raise MediaDownloadBlocked, 'Не удалось сжать видео до допустимого размера для Telegram.' unless path && File.file?(path) && File.size(path) <= limit
+  end
+
+  retried = false
+  begin
+    yield path
+  rescue => error
+    # Only an explicit rejection is safe to retry. A timeout may already have
+    # delivered the video, so never retry ambiguous failures here.
+    raise unless telegram_upload_too_large?(error) && !retried
+
+    retried = true
+    smaller_limit = [24 * 1024 * 1024, (File.size(path) * 0.75).floor].min
+    path = prepare_video_for_telegram(path, smaller_limit)
+    unless path && File.file?(path) && File.size(path) <= smaller_limit
+      raise MediaDownloadBlocked, 'Telegram отклонил размер файла, а дополнительно сжать его не удалось. Попробуй более короткий ролик.'
+    end
+    puts 'Telegram rejected upload size; retrying once with a smaller file'
+    retry
+  end
+end
 
 def clean_media_link(link)
   link.to_s.sub(/[)\].,!?]+\z/, "")
@@ -114,17 +158,18 @@ end
 def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context: nil, source_link: nil, feed_control: nil)
   return unless video_path && File.exist?(video_path)
 
-  file_size_mb = (File.size(video_path).to_f / 1024 / 1024).round(1)
-  metadata = video_upload_metadata(video_path)
-  params = {
-    chat_id: chat_id,
-    video: Faraday::UploadIO.new(video_path, "video/mp4"),
-    caption: caption,
-    supports_streaming: true
-  }.merge(metadata)
-
   feed_keys = (feed_context || feed_control) ? video_feed_keys(source_link, video_path) : []
-  response = bot.api.send_video(**params)
+  metadata = {}
+  response = with_telegram_upload_size_retry(video_path) do |ready_path|
+    video_path = ready_path
+    metadata = video_upload_metadata(video_path)
+    File.open(video_path, 'rb') do |file|
+      bot.api.send_video(chat_id: chat_id, video: Faraday::UploadIO.new(file, 'video/mp4', File.basename(video_path)),
+                         caption: caption, supports_streaming: true, **metadata)
+    end
+  end
+  file_size_mb = (File.size(video_path).to_f / 1024 / 1024).round(1)
+  feed_keys |= video_feed_keys(source_link, video_path) if feed_context || feed_control
   record_sent_videos(chat_id, response, sources: [source_name])
   if feed_control
     visuals = video_feed_visuals([video_path], submitter: feed_control[:submitter], one_off: true)
@@ -146,7 +191,7 @@ def send_video_file(bot, chat_id, video_path, caption, source_name, feed_context
   puts "Telegram video sent: #{details}"
 rescue => e
   puts "Ошибка отправки в Telegram (#{source_name}): #{e.class}: #{e.message}"
-  safe_send_message(bot, chat_id, "Ошибка при отправке видео: #{e.message}")
+  safe_send_message(bot, chat_id, telegram_upload_failure_message(e))
 ensure
   cleanup_media_path(video_path)
 end
@@ -165,8 +210,14 @@ def send_animation_file(bot, chat_id, path, caption, feed_context: nil, source_l
   return unless path && File.exist?(path)
 
   keys = feed_control ? video_feed_keys(source_link, path) : []
-  response = bot.api.send_animation(chat_id: chat_id, animation: Faraday::UploadIO.new(path, 'video/mp4'),
-                                    caption: caption, **video_upload_metadata(path))
+  response = with_telegram_upload_size_retry(path) do |ready_path|
+    path = ready_path
+    File.open(path, 'rb') do |file|
+      bot.api.send_animation(chat_id: chat_id, animation: Faraday::UploadIO.new(file, 'video/mp4', File.basename(path)),
+                             caption: caption, **video_upload_metadata(path))
+    end
+  end
+  keys |= video_feed_keys(source_link, path) if feed_control
   # Animation file IDs cannot be sent as videos or used in video albums/history.
   # Without an attached per-item control, fail closed: never auto-enqueue a GIF.
   if feed_control
@@ -177,7 +228,7 @@ def send_animation_file(bot, chat_id, path, caption, feed_context: nil, source_l
   puts 'Telegram Twitter animation sent'
 rescue => e
   puts "Ошибка отправки GIF: #{e.class}: #{e.message}"
-  safe_send_message(bot, chat_id, "Ошибка при отправке GIF: #{e.message}")
+  safe_send_message(bot, chat_id, telegram_upload_failure_message(e, prefix: 'Ошибка при отправке GIF'))
 ensure
   cleanup_media_path(path)
 end
@@ -214,7 +265,12 @@ def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
   response
 rescue => e
   puts "Ошибка отправки альбома: #{e.class}: #{e.message}"
-  safe_send_message(bot, chat_id, "Не удалось отправить собранный пост: #{e.message}")
+  message = if telegram_upload_too_large?(e)
+              'Подборка слишком большая для одного сообщения Telegram. Попробуй отправить меньше ссылок за один раз.'
+            else
+              telegram_upload_failure_message(e, prefix: 'Не удалось отправить собранный пост')
+            end
+  safe_send_message(bot, chat_id, message)
   nil
 ensure
   videos.each { |video| cleanup_media_path(video[:path]) }
