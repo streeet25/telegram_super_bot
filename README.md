@@ -119,6 +119,19 @@ deploying. Run `ruby test/twitter_no_video_test.rb` and
 `python3 test/twitter_extractor_test.py` (in yt-dlp's Python environment) for
 offline regression coverage, including the upstream article-redirect failure.
 
+Native Twitter/X GIFs are recognized by the `animated_gif` media type, not by
+duration, file extension or absence of sound. They are sent as Telegram
+animations (silent MP4 via [`sendAnimation`](https://core.telegram.org/bots/api#sendanimation)),
+including when manually published into the feed. Unmarked GIFs never start the
+30-second publication timer, even with general consent enabled; use
+**Опубликовать в Побочку** under that GIF. `+` remains immediate explicit one-off
+permission, and `-` remains private until a later explicit button click. Ordinary
+videos retain their existing publication rules. GIFs stay outside video-history
+albums and are sent individually between adjacent groups of ordinary videos,
+preserving link order. Animation uploads are capped below Telegram's 50 MB limit.
+Offline coverage: `ruby test/twitter_gif_test.rb` and
+`bundle _2.6.7_ exec ruby test/twitter_gif_telegram_smoke.rb` (application runtime).
+
 Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (the latter needs the same Python environment as yt-dlp) for offline Threads coverage, plus the existing feed and native Telegram smoke tests. Live verification should call the downloader without sending messages or publishing to the channel.
 
 ### Video format selection
@@ -210,7 +223,7 @@ specific video. The sender, source chat and exact control-message ID are checked
 on every callback; forwarded/copied buttons and other group members cannot act.
 Controls expire after 24 hours and never change the user's general preference.
 
-Eligible **unmarked** links wait 30 seconds after Telegram confirms that the
+Eligible **unmarked ordinary-video** links wait 30 seconds after Telegram confirms that the
 controls are attached, or a fresh 30 seconds after private consent if later.
 If no button is pressed, existing publication/consent settings apply. `+` still
 publishes immediately; `-` and opted-out/private clips never auto-publish, but
@@ -223,6 +236,11 @@ Keyboard attachment failure suppresses automatic unmarked publication rather tha
 starting a timer without a visible cancel button. Original video delivery still
 works. Old downloads are not backfilled with controls. No update broadcast runs
 on startup or deployment.
+
+Unmarked Twitter GIFs are an exception: their controls stay `awaiting_choice`
+until the sender explicitly presses publish. Later general consent and restarts
+do not release them. Manual publication sends an animation anonymously, preserves
+global preferences, and uses the same bans, duplicate checks and callback binding.
 
 Control records live in the same private state file, including source chat/message
 IDs, file IDs, fingerprints and short bot-authored labels. Unpublished/unapproved

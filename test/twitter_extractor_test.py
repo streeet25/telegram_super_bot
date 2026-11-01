@@ -64,6 +64,22 @@ class TwitterExtractorTest(unittest.TestCase):
                                    'entities': {'urls': [{'expanded_url': self.ARTICLE}]}})
             self.assertEqual('own', result['id'])
             self.assertTrue(result['formats'][0]['url'].endswith('/own.mp4'))
+            self.assertEqual('animation' if kind == 'animated_gif' else None, result.get('videomorph_media_type'))
+
+    def test_media_type_is_per_entry_not_inferred_from_quote_or_duration(self):
+        result = self.extract({'full_text': 'Ordinary short video', 'extended_entities': {'media': [self.video()]},
+                               'quoted_status': {'extended_entities': {'media': [self.video('quote', 'animated_gif')]}}})
+        entries = list(result['entries'])
+        self.assertIsNone(entries[0].get('videomorph_media_type'))
+        self.assertEqual('animation', entries[1]['videomorph_media_type'])
+
+    def test_own_gif_stays_first_and_has_animation_marker(self):
+        result = self.extract({'full_text': 'Own GIF', 'extended_entities': {'media': [self.video('own', 'animated_gif')]},
+                               'quoted_status': {'extended_entities': {'media': [self.video('quote')]}}})
+        entries = list(result['entries'])
+        self.assertEqual('own', entries[0]['id'])
+        self.assertEqual('animation', entries[0]['videomorph_media_type'])
+        self.assertIsNone(entries[1].get('videomorph_media_type'))
 
     def test_own_video_stays_before_quoted_video(self):
         result = self.extract({'full_text': 'Own video', 'extended_entities': {'media': [self.video()]},
@@ -113,7 +129,7 @@ class TwitterExtractorTest(unittest.TestCase):
     def test_cli_plugin_is_scoped_and_has_priority(self):
         # --list-extractors exits before plugin loading in yt-dlp 2026.10.26,
         # and is alphabetically sorted. Exercise actual CLI URL selection.
-        fixture = {'full_text': 'Video', 'extended_entities': {'media': [self.video()]}}
+        fixture = {'full_text': 'GIF', 'extended_entities': {'media': [self.video(kind='animated_gif')]}}
         script = f"""
 import yt_dlp
 from unittest.mock import patch
@@ -127,7 +143,9 @@ with patch.object(TwitterIE, '_extract_status', return_value={fixture!r}), \\
         for extra, expected in ((['--plugin-dirs', str(ROOT / 'ytdlp_plugins')], 'videomorph:twitter'), ([], 'twitter')):
             result = subprocess.run(command + extra + [self.URL], text=True, capture_output=True)
             self.assertEqual(0, result.returncode, result.stderr)
-            self.assertEqual(expected, json.loads(result.stdout)['extractor'])
+            info = json.loads(result.stdout)
+            self.assertEqual(expected, info['extractor'])
+            self.assertEqual('animation' if extra else None, info.get('videomorph_media_type'))
 
 
 if __name__ == '__main__':

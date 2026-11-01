@@ -14,7 +14,12 @@ class VideoFeed
 
   # Every delivered clip owns its own control record, including private/minus
   # clips. Unapproved records never participate in public deduplication.
-  def register_control(file_id:, keys:, visual:, control:, context:, video_message_id:, caption:)
+  def register_control(file_id:, keys:, visual:, control:, context:, video_message_id:, caption:, media_type: 'video')
+    raise VideoFeedError, 'Unsupported media type' unless %w[video animation].include?(media_type)
+    # Global consent and its delayed publisher must never release a GIF.
+    # An explicit + remains a one-item permission, as does the publish button.
+    manual_animation = media_type == 'animation' && control[:choice] != :publish
+    context = nil if manual_animation
     change do |data|
       submitter = control.fetch(:submitter)
       next nil if data['banned'].include?(submitter)
@@ -30,7 +35,7 @@ class VideoFeed
       status = :duplicate if status == :queued && deduplicate!(data, keys, visual: visual)
       id = SecureRandom.hex(12)
       job = {
-        'id' => id, 'file_id' => file_id, 'keys' => keys.uniq,
+        'id' => id, 'file_id' => file_id, 'keys' => keys.uniq, 'media_type' => media_type,
         'visual' => VideoFingerprint.valid?(visual) ? visual : nil,
         'submitter' => submitter, 'status' => status.to_s, 'attempts' => 0,
         'consent_request' => context && context[:consent_request],
@@ -40,7 +45,7 @@ class VideoFeed
         'control_expires_at' => @clock.call + CONTROL_TTL,
         'control_chat_id' => control.fetch(:chat_id), 'control_video_id' => video_message_id,
         'control_message_id' => video_message_id, 'control_kind' => 'video',
-        'control_caption' => caption, 'control_delay' => control[:choice] == :default ? CONTROL_DELAY : 0,
+        'control_caption' => caption, 'control_delay' => !manual_animation && control[:choice] == :default ? CONTROL_DELAY : 0,
         # + retains immediate publication. Default waits until UI is attached.
         'control_ready' => control[:choice] == :publish
       }
@@ -130,7 +135,9 @@ def video_feed_control_text(job)
   when 'deleted', 'deleting', 'delete_pending', 'delete_failed' then 'ПОБОЧКА: публикация обработана модератором.'
   when 'blocked' then 'ПОБОЧКА: публикация недоступна.'
   when 'failed' then 'ПОБОЧКА: отправка не удалась. Можно повторить кнопкой.'
-  else 'ПОБОЧКА: не публикуется. «В Побочку» разрешит только этот ролик; общая настройка не изменится.'
+  else
+    label = job['media_type'] == 'animation' ? 'Опубликовать в Побочку' : 'В Побочку'
+    "ПОБОЧКА: не публикуется. «#{label}» разрешит только этот ролик; общая настройка не изменится."
   end
 end
 
@@ -139,7 +146,7 @@ def video_feed_control_markup(job)
   buttons = if inactive
               [[{ text: job['status'] == 'sent' ? 'Уже в Побочке' : 'Статус публикации', callback_data: "feed_item:status:#{job['id']}" }]]
             else
-              [[{ text: 'В Побочку', callback_data: "feed_item:publish:#{job['id']}" },
+              [[{ text: job['media_type'] == 'animation' ? 'Опубликовать в Побочку' : 'В Побочку', callback_data: "feed_item:publish:#{job['id']}" },
                 { text: 'Не публиковать', callback_data: "feed_item:skip:#{job['id']}" }]]
             end
   JSON.generate(inline_keyboard: buttons)
@@ -171,15 +178,20 @@ rescue => e
   puts "Video feed control refresh error: #{e.class}"
 end
 
-def attach_video_feed_control(bot, message, control:, context:, keys:, visual:, caption:, album: false)
-  return unless video_feed && control && message && message.respond_to?(:video) && message.video
+def attach_video_feed_control(bot, message, control:, context:, keys:, visual:, caption:, album: false, media_type: 'video')
+  return unless video_feed && control && message
+  video = if media_type == 'animation'
+            message.respond_to?(:animation) ? message.animation : nil
+          else
+            message.respond_to?(:video) ? message.video : nil
+          end
+  return unless video
   return unless message.chat.id == control[:chat_id]
 
-  video = message.video
   keys = Array(keys).dup
   keys << "telegram:#{video.file_unique_id}" unless video.file_unique_id.to_s.empty?
   job = video_feed.register_control(file_id: video.file_id, keys: keys, visual: visual, control: control,
-                                    context: context, video_message_id: message.message_id, caption: caption)
+                                    context: context, video_message_id: message.message_id, caption: caption, media_type: media_type)
   return unless job
 
   if album

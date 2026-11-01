@@ -446,6 +446,13 @@ def download_video_with_ytdlp(
   end
 
   validate_ytdlp_media_info!(media_info)
+  yield media_info if block_given?
+  upload_limit = YTDLP_MAX_FILESIZE_BYTES
+  if source_name == 'Twitter/X' && media_info['videomorph_media_type'] == 'animation'
+    # sendAnimation's cloud Bot API limit is 50 MB; leave room below it even
+    # when the configured video limit is larger or disabled.
+    upload_limit = [upload_limit, 49 * 1024 * 1024].compact.min
+  end
 
   configured_format = ENV["YTDLP_FORMAT"].to_s.strip
   format_candidates =
@@ -522,13 +529,13 @@ def download_video_with_ytdlp(
     end
 
     selected = candidates.find { |path| File.extname(path).downcase == ".mp4" } || candidates.first
-    adjusted = prepare_video_for_telegram(selected, YTDLP_MAX_FILESIZE_BYTES)
+    adjusted = prepare_video_for_telegram(selected, upload_limit)
     if adjusted
       return adjusted
     end
 
     FileUtils.remove_entry(tmp_dir) if Dir.exist?(tmp_dir)
-    raise MediaDownloadBlocked, "Видео не удалось уложить в лимит #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
+    raise MediaDownloadBlocked, "Видео не удалось уложить в лимит #{bytes_to_megabytes(upload_limit)} МБ, пропускаю."
   end
 
   if download_limit_hit

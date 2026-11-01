@@ -161,6 +161,27 @@ def video_media_payload(media, caption: nil, metadata: {})
   end
 end
 
+def send_animation_file(bot, chat_id, path, caption, feed_context: nil, source_link: nil, feed_control: nil)
+  return unless path && File.exist?(path)
+
+  keys = feed_control ? video_feed_keys(source_link, path) : []
+  response = bot.api.send_animation(chat_id: chat_id, animation: Faraday::UploadIO.new(path, 'video/mp4'),
+                                    caption: caption, **video_upload_metadata(path))
+  # Animation file IDs cannot be sent as videos or used in video albums/history.
+  # Without an attached per-item control, fail closed: never auto-enqueue a GIF.
+  if feed_control
+    visuals = video_feed_visuals([path], submitter: feed_control[:submitter], one_off: true)
+    attach_video_feed_control(bot, response, control: feed_control, context: feed_context,
+                             keys: keys, visual: visuals.first, caption: caption, media_type: 'animation')
+  end
+  puts 'Telegram Twitter animation sent'
+rescue => e
+  puts "Ошибка отправки GIF: #{e.class}: #{e.message}"
+  safe_send_message(bot, chat_id, "Ошибка при отправке GIF: #{e.message}")
+ensure
+  cleanup_media_path(path)
+end
+
 def send_video_album(bot, chat_id, videos, caption: "", feed_context: nil)
   uploads = {}
   media = videos.each_with_index.map do |video, index|
@@ -200,15 +221,29 @@ ensure
 end
 
 def download_video_item(item)
+  media_type = 'video'
   path = case item.fetch(:source)
-         when :twitter then download_twitter_video(item.fetch(:link))
+         when :twitter
+           download_twitter_video(item.fetch(:link)) do |info|
+             media_type = 'animation' if info['videomorph_media_type'] == 'animation'
+           end
          when :instagram then download_instagram_video(item.fetch(:link))
          when :youtube_shorts then download_youtube_shorts_video(item.fetch(:link))
          when :threads then download_threads_video(item.fetch(:link))
          end
   return nil unless path
 
-  { path: path, source: item.fetch(:source).to_s, link: item.fetch(:link), metadata: video_upload_metadata(path) }
+  { path: path, source: item.fetch(:source).to_s, link: item.fetch(:link), metadata: video_upload_metadata(path), media_type: media_type }
+end
+
+def send_downloaded_media(bot, chat_id, video)
+  if video[:media_type] == 'animation'
+    send_animation_file(bot, chat_id, video[:path], 'GIF из Twitter', feed_context: video[:feed_context],
+                        source_link: video[:link], feed_control: video[:feed_control])
+  else
+    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source],
+                    feed_context: video[:feed_context], source_link: video[:link], feed_control: video[:feed_control])
+  end
 end
 
 def process_video_link_batch(bot, chat_id, items, feed_context: nil)
@@ -230,11 +265,14 @@ def process_video_link_batch(bot, chat_id, items, feed_context: nil)
 
   return if downloaded.empty?
 
-  if downloaded.one?
-    video = downloaded.first
-    send_video_file(bot, chat_id, video[:path], "Видео из #{video[:source]}", video[:source], feed_context: video[:feed_context], source_link: video[:link], feed_control: video[:feed_control])
-  else
-    send_video_album(bot, chat_id, downloaded, caption: "Подборка из #{downloaded.size} видео", feed_context: feed_context)
+  # Telegram albums do not accept animations. Preserve source order and group
+  # only adjacent ordinary videos; GIFs remain individual looping animations.
+  downloaded.chunk { |video| video[:media_type] == 'animation' }.each do |animations, group|
+    if animations || group.one?
+      group.each { |video| send_downloaded_media(bot, chat_id, video) }
+    else
+      send_video_album(bot, chat_id, group, caption: "Подборка из #{group.size} видео", feed_context: feed_context)
+    end
   end
 end
 
@@ -281,8 +319,8 @@ def process_media_job(bot, job)
     caption = dark_mode ? "Фото из Twitter (ночной режим)" : "Фото из Twitter"
     send_photo_file(bot, chat_id, screenshot_path, caption, "Twitter фото")
   when :twitter_video
-    video_path = download_twitter_video(link)
-    send_video_file(bot, chat_id, video_path, "Видео из Twitter", "Twitter", feed_context: job[:feed_context], source_link: link)
+    process_video_link_batch(bot, chat_id, [{ source: :twitter, link: link, feed_control: job[:feed_control] }],
+                             feed_context: job[:feed_context])
   when :instagram_video
     video_path = download_instagram_video(link)
     send_video_file(bot, chat_id, video_path, "Видео из Instagram", "Instagram", feed_context: job[:feed_context], source_link: link)

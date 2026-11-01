@@ -267,7 +267,11 @@ class VideoFeed
           update_job(job['id'], 'status' => 'deleted')
         else
           # Never forward a source message or reuse its caption/attribution.
-          response = @api.send_video(chat_id: channel_id, video: job.fetch('file_id'), supports_streaming: true)
+          response = if job.fetch('media_type', 'video') == 'animation'
+                       @api.send_animation(chat_id: channel_id, animation: job.fetch('file_id'))
+                     else
+                       @api.send_video(chat_id: channel_id, video: job.fetch('file_id'), supports_streaming: true)
+                     end
           raise VideoFeedError, 'Missing Telegram message ID' unless response.respond_to?(:message_id) && response.message_id
 
           update_job(job['id'], 'status' => 'sent', 'message_id' => response.message_id, 'sent_at' => @clock.call)

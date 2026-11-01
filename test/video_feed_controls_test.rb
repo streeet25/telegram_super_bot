@@ -17,6 +17,11 @@ class VideoFeedControlsTest < Minitest::Test
       @calls << [:video, params]
       OpenStruct.new(message_id: @calls.size)
     end
+    def send_animation(**params)
+      raise send_error if send_error
+      @calls << [:animation, params]
+      OpenStruct.new(message_id: @calls.size)
+    end
     def edit_message_caption(**params)
       raise fail_edit if fail_edit.is_a?(Exception)
       raise 'UI failed' if fail_edit
@@ -46,11 +51,11 @@ class VideoFeedControlsTest < Minitest::Test
     VideoFeed.new(path: @file, api: @api, channel_id: -10042, username: 'pobo4ka_ink', clock: -> { @now })
   end
 
-  def register(choice = :default, private_chat: false, id: 1)
+  def register(choice = :default, private_chat: false, id: 1, media_type: 'video')
     context = choice == :skip ? nil : @video_feed.submission_context('user:10', private_chat: private_chat, one_off: choice == :publish)
     control = @video_feed.control_context('user:10', chat_id: -20, choice: choice)
     @video_feed.register_control(file_id: "file#{id}", keys: ["key#{id}"], visual: nil, control: control,
-                                 context: context, video_message_id: id, caption: 'Видео')
+                                 context: context, video_message_id: id, caption: 'Видео', media_type: media_type)
   end
 
   def activate(job)
@@ -76,6 +81,83 @@ class VideoFeedControlsTest < Minitest::Test
     assert_equal 1, @api.calls.count { |name, _| name == :video }
     assert_equal 'Видео', @api.calls.last[1][:caption]
     assert_equal 'Уже в Побочке', JSON.parse(@api.calls.last[1][:reply_markup])['inline_keyboard'][0][0]['text']
+  end
+
+  def test_default_gif_waits_for_button_even_with_global_consent_and_after_restart
+    @video_feed.set_preference('user:10', enabled: true)
+    job = register(media_type: 'animation')
+    assert_equal 'awaiting_choice', job['status']
+    assert_equal 0, job['control_delay']
+    assert_nil job['consent_request']
+    activate(job)
+    @now += 3600
+    @video_feed = build_feed
+    refute @video_feed.process_next
+    assert_equal 'Опубликовать в Побочку', JSON.parse(video_feed_control_markup(job))['inline_keyboard'][0][0]['text']
+    choose(job, 'publish')
+    assert @video_feed.process_next
+    assert_equal [[:animation, { chat_id: -10042, animation: 'file1' }]], @api.calls.select { |name, _| [:video, :animation].include?(name) }
+    assert_equal 'on', @video_feed.preference('user:10')
+    choose(job, 'publish')
+    refute @video_feed.process_next
+  end
+
+  def test_gif_is_not_released_by_later_general_consent
+    job = register(private_chat: true, media_type: 'animation')
+    activate(job)
+    token = JSON.parse(File.read(@file))['consent_requests'].keys.first
+    @video_feed.set_preference('user:10', enabled: true, consent_request: token)
+    @now += 60
+    refute @video_feed.process_next
+    assert_equal 'awaiting_choice', @video_feed.control_snapshot(job['id'])['status']
+  end
+
+  def test_gif_plus_is_explicit_immediate_permission_and_minus_waits
+    plus = register(:publish, private_chat: true, media_type: 'animation')
+    assert @video_feed.process_next
+    assert_equal 'sent', @video_feed.control_snapshot(plus['id'])['status']
+    assert_nil @video_feed.preference('user:10')
+    minus = register(:skip, id: 2, media_type: 'animation')
+    activate(minus)
+    @now += 60
+    refute @video_feed.process_next
+    choose(minus, 'publish')
+    assert @video_feed.process_next
+    assert_equal 2, @api.calls.count { |name, _| name == :animation }
+  end
+
+  def test_animation_ids_use_animation_type_and_clean_caption_for_controls
+    message = OpenStruct.new(message_id: 4, chat: OpenStruct.new(id: -20),
+                             animation: OpenStruct.new(file_id: 'gif-file', file_unique_id: 'gif-unique'), video: nil)
+    attach_video_feed_control(@bot, message, control: { submitter: 'user:10', chat_id: -20, choice: :default },
+                              context: @video_feed.submission_context('user:10', private_chat: false),
+                              keys: ['gif-key'], visual: nil, caption: 'GIF из Twitter', media_type: 'animation')
+    assert_equal [:caption], @api.calls.map(&:first)
+    assert_equal 'GIF из Twitter', @api.calls.last[1][:caption]
+    id = JSON.parse(@api.calls.last[1][:reply_markup])['inline_keyboard'][0][0]['callback_data'].split(':').last
+    job = @video_feed.control_snapshot(id)
+    assert_equal 'gif-file', job['file_id']
+    assert_equal 'animation', job['media_type']
+    assert_includes job['keys'], 'telegram:gif-unique'
+    @now += 60
+    refute @video_feed.process_next
+  end
+
+  def test_animation_manual_publish_respects_duplicates_privacy_and_sender
+    @video_feed.set_preference('user:10', enabled: false)
+    job = register(private_chat: true, media_type: 'animation')
+    activate(job)
+    assert_raises(VideoFeedError) { choose(job, 'publish', submitter: 'user:99') }
+    choose(job, 'publish')
+    @video_feed.set_preference('user:10', enabled: false)
+    refute @video_feed.process_next
+    assert_equal 'off', @video_feed.preference('user:10')
+    choose(job, 'publish')
+    assert @video_feed.process_next
+    duplicate = register(:skip, media_type: 'animation')
+    activate(duplicate)
+    assert_equal 'duplicate', choose(duplicate, 'publish')['status']
+    refute @video_feed.process_next
   end
 
   def test_default_private_opt_out_does_not_auto_publish_but_button_is_one_off_consent

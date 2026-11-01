@@ -17,7 +17,7 @@ YTDLP_MAX_FILESIZE_BYTES = 96 * 1024 * 1024 unless defined?(YTDLP_MAX_FILESIZE_B
 class YtdlpDownloadTest < Minitest::Test
   def setup
     @saved_format = ENV.delete('YTDLP_FORMAT')
-    @calls, @dirs = [], []
+    @calls, @dirs, @upload_limits = [], [], []
   end
 
   def teardown
@@ -25,7 +25,7 @@ class YtdlpDownloadTest < Minitest::Test
     @dirs.each { |dir| FileUtils.remove_entry(dir) if Dir.exist?(dir) }
   end
 
-  def download(outcome = :success, use_cookies: true, extra_args: [])
+  def download(outcome = :success, use_cookies: true, extra_args: [], source_name: 'test', info: { 'id' => 'fixture' }, &metadata_block)
     runner = lambda do |*args, **limits|
       @calls << [args, limits]
       if (index = args.index('-o'))
@@ -36,7 +36,7 @@ class YtdlpDownloadTest < Minitest::Test
         OpenStruct.new(status: OpenStruct.new(success?: [:success, :filesize_skip].include?(outcome)), stdout: output, stderr: '',
                        timed_out: outcome == :timeout, limit_exceeded: outcome == :limit)
       else
-        OpenStruct.new(status: OpenStruct.new(success?: outcome != :probe_error), stdout: '{"id":"fixture"}',
+        OpenStruct.new(status: OpenStruct.new(success?: outcome != :probe_error), stdout: JSON.generate(info),
                        stderr: outcome == :probe_error ? 'HTTP Error 400: Bad Request' : '', timed_out: false)
       end
     end
@@ -46,10 +46,10 @@ class YtdlpDownloadTest < Minitest::Test
           stub(:validate_ytdlp_media_info!, nil) do
             stub(:download_filesize_limit_arg, '150M') do
               stub(:download_dir_limit_bytes, 300 * 1024 * 1024) do
-                stub(:prepare_video_for_telegram, ->(file, _limit) { file }) do
+                stub(:prepare_video_for_telegram, ->(file, limit) { @upload_limits << limit; file }) do
                   stub(:run_command_with_limits, runner) do
                     download_video_with_ytdlp('https://example.invalid/post', 'yt_formats_', require_success: true,
-                                             use_cookies: use_cookies, extra_args: extra_args)
+                                             use_cookies: use_cookies, extra_args: extra_args, source_name: source_name, &metadata_block)
                   end
                 end
               end
@@ -76,6 +76,21 @@ class YtdlpDownloadTest < Minitest::Test
       assert_equal '1', command[command.index('--playlist-items') + 1]
       assert_equal '/private/cookies.txt', command[command.index('--cookies') + 1]
     end
+  end
+
+  def test_metadata_callback_keeps_path_return_value_and_uses_existing_probe
+    infos = []
+    file = download { |info| infos << info }
+    assert File.file?(file)
+    assert_equal [{ 'id' => 'fixture' }], infos
+    assert_equal 2, @calls.size
+  end
+
+  def test_twitter_gif_uses_animation_upload_size_limit_but_regular_video_does_not
+    download(source_name: 'Twitter/X', info: { 'id' => 'fixture', 'videomorph_media_type' => 'animation' })
+    assert_equal [49 * 1024 * 1024], @upload_limits
+    download(source_name: 'Twitter/X')
+    assert_equal YTDLP_MAX_FILESIZE_BYTES, @upload_limits.last
   end
 
   def test_explicit_format_override_is_preserved

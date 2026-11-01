@@ -138,6 +138,16 @@ container lifecycle directly: the launcher uses `docker run --rm`, and systemd
 may recreate a stopped container. Changes copied into a running container are not
 persistent; deploy a validated image and update the launcher's pinned digest.
 
+Twitter GIF support adds optional `media_type: "animation"` to feed control jobs;
+missing `media_type` still means video. Keep this field across restarts so queued
+manual GIF publications use `sendAnimation`, not `sendVideo`. Unmarked animations
+stay `awaiting_choice` with no general-consent link or automatic timer. For a
+rollback to a pre-GIF image, stop the service, privately back up state, cancel
+unfinished animation jobs and expire their controls before restarting: the old
+publisher cannot send animation file IDs correctly, and its old controls must
+not re-queue them. Preserve all already-published history and other jobs. Never
+replace current state with an older snapshot to perform this downgrade.
+
 Photo-post state is saved as `/var/lib/videomorph/photo_history.json` (mode `0600`)
 when the first photo is received. Preserve this file alongside the existing runtime
 state when deploying. It contains private Telegram file IDs and captions, not image
