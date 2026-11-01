@@ -3,13 +3,46 @@
 The production bot is on `root@2.24.29.59` in the Docker container
 `videomorph-production`. The host was supplied by the owner and verified on
 2026-11-01: `videomorph.service` is enabled/running and Telegram `getMe` confirms
-`VideoMorph_bot`. The active anonymous-first release is described below.
+`VideoMorph_bot`. The active release is described below.
 
 The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
-## Active release — Instagram anonymous-first (2026-11-01)
+## Active release — Twitter text-only posts (2026-11-01)
+
+`videomorph:twitter-text-20261101`, pinned as
+`sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`,
+adds source commit `be88b38` on top of the retained Instagram anonymous-first
+image below. The commit was pushed before rollout. No dependency or environment
+changes were made; yt-dlp remains `2026.10.26`.
+
+The Twitter extractor now removes ordinary external-link fallback and article
+preview cards from a copy of fetched tweet metadata. Confirmed text/photo-only
+posts therefore use the existing silent no-video path, instead of following an
+article URL and reporting an extraction error. Native videos/GIFs, player cards,
+own-before-quoted ordering, credentials and Twitter extractor arguments are
+preserved. API/access failures, timeouts and genuine extraction errors remain
+visible. The official version-pinned Twitter source reproduces the article-link
+fallback in offline fixtures; the user's exact failing tweet URL was not supplied.
+
+The final candidate passed 184 Ruby tests, 31 Python tests, both native Telegram
+serialization smokes and the real yt-dlp/ffmpeg merge smoke, without network or
+production state. The Twitter CLI test verifies actual plugin selection, not
+`--list-extractors` (which exits before plugin loading in this yt-dlp version).
+
+The launcher digest was replaced atomically after stopping the old service.
+Seven state files, environment, cookies, container user and mounts were preserved.
+The private pre-release backup is
+`/etc/videomorph/runtime-backups/twitter-text-20261101T123018Z`.
+After restart, `getMe` confirmed `VideoMorph_bot`; the service, media workers and
+feed were ready, with no startup/polling-conflict markers. Runtime source hashes
+matched the committed files. No Telegram test sends or announcements were made.
+Rollback targets the retained Instagram image below; do not restore old state
+over newer user activity. The temporary build directory was removed; the private
+backup and previous release image remain available.
+
+## Previous release — Instagram anonymous-first (2026-11-01)
 
 `videomorph:instagram-anonymous-20261101`, pinned as
 `sha256:c1992410029366016bf8f915d9c4282d26c7a1dc2e0c2f9b5f915ce155701a91`,
@@ -76,7 +109,7 @@ anonymous-first behavior.
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the active image by digest, as recorded above. The previous image, `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`), is retained on the active host for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+- The launcher pins the active image by digest, as recorded above. The previous image, `videomorph:instagram-anonymous-20261101` (`sha256:c1992410029366016bf8f915d9c4282d26c7a1dc2e0c2f9b5f915ce155701a91`), is retained on the active host for rollback. The older `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`) also remains, but lacks the Instagram fixes. These images understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
 
 The clean-caption release no longer appends publication status to video captions,
 including after publication, cancellation, consent or a duplicate result. Controls
