@@ -3,14 +3,51 @@
 The production bot is on `root@2.24.29.59` in the Docker container
 `videomorph-production`. The host was supplied by the owner and verified on
 2026-11-01: `videomorph.service` is enabled/running and Telegram `getMe` confirms
-`VideoMorph_bot`. The running image is still the clean-caption release below;
-the prepared format fix has not been deployed.
+`VideoMorph_bot`. The active anonymous-first release is described below.
 
 The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
-## Prepared format fix — not deployed
+## Active release — Instagram anonymous-first (2026-11-01)
+
+`videomorph:instagram-anonymous-20261101`, pinned as
+`sha256:c1992410029366016bf8f915d9c4282d26c7a1dc2e0c2f9b5f915ce155701a91`,
+contains source commit `fd862cf`, the previously prepared format-selector fix,
+and `yt-dlp[default]==2026.10.26`. The source commit was pushed before rollout.
+The complete offline suite passed: 179 Ruby tests, 18 Python tests, two native
+Telegram serialization smokes, and the real yt-dlp/ffmpeg merge smoke.
+
+Instagram now attempts extraction/download without account cookies and without
+external yt-dlp configuration, then retries once with configured cookies on an
+extraction failure. Successful public downloads never open the cookie jar. Safety
+stops (timeouts, duration/size limits including yt-dlp's successful filesize skip)
+and confirmed posts without video do not retry. A known audience restriction
+survives an uninformative authenticated HTTP 400. `media_errors.rb` must be included
+alongside `config.rb` and `ytdlp.rb`; other providers still catch the same base
+error types. No state schema, publication policy, credentials or account settings
+were changed; no announcements or test Telegram sends were performed.
+
+The launcher was switched atomically after stopping the old container. The seven
+state files, environment and cookie file were preserved; environment, mounts and
+Telegram identity were checked after restart. The root-only pre-release backup is
+`/etc/videomorph/runtime-backups/instagram-anonymous-20261101T120756Z`.
+For rollback, pin the retained clean-caption image below and restart through
+systemd; do not restore old state over newer user activity.
+
+Live download-only checks in the candidate succeeded anonymously for
+`De6RRGNtKMa` (12 seconds, 1440x2560, 9,924,285 bytes) and `Db8NHvWo46E`
+(41 seconds, 1080x1920, 20,779,050 bytes). `DaDAth8giB6` remained audience-restricted
+after both public and authenticated attempts; this is reported clearly, not
+claimed fixed. Cookie-copy hashes were unchanged for anonymous successes.
+After rollout, the exact `De6RRGNtKMa/?vrfl=...` link was also downloaded through
+the running production image: 12 seconds, 1440x2560, Telegram-ready MP4, no
+authenticated retry and no cookie-copy changes. The service and workers were
+ready, the feed initialized successfully, and no startup/polling-conflict markers
+were present. The temporary build directory was removed; both release images and
+the private rollback backup remain.
+
+## Format-fix preparation history
 
 On 2026-10-27, an offline candidate was built on the old host `5.61.91.77` as
 `videomorph:formats-ytdlp20261026-candidate-20261027`, digest
@@ -28,8 +65,9 @@ audio-only formats, following the official
 [format-selection rules](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/README.md#format-selection).
 The user's specific URL for the 2026-10-27 format error has not been supplied or
 verified. That preparation did not change any live service, launcher, cookies or
-state. Download the failing URL without Telegram sends before rolling out this
-candidate to the now-confirmed active host.
+state. Its selector fix and yt-dlp update are now included in the active release
+above. Do not replace the active image with this older candidate, which lacks the
+anonymous-first behavior.
 
 ## Verified active runtime
 
@@ -38,7 +76,7 @@ candidate to the now-confirmed active host.
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the Docker image by digest. The clean-caption release validated on 2026-10-16 is `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`). The previous image `videomorph:threads-20261012` (`sha256:3dd364279f2704e8c6f2c3e61401a449652774b995f8f4bc30b670476d25ba97`) is retained for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+- The launcher pins the active image by digest, as recorded above. The previous image, `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`), is retained on the active host for rollback. Both understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
 
 The clean-caption release no longer appends publication status to video captions,
 including after publication, cancellation, consent or a duplicate result. Controls
