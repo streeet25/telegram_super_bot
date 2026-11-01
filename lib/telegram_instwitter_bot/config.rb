@@ -97,7 +97,6 @@ DOWNLOAD_DIR_LIMIT_MULTIPLIER = 2
 ENABLE_INSTAGRAM_LEGACY_FETCH = ENV["ENABLE_INSTAGRAM_LEGACY_FETCH"] == "1"
 DROP_PENDING_UPDATES_ON_START = ENV["TELEGRAM_DROP_PENDING_UPDATES_ON_START"] == "1"
 
-class MediaDownloadBlocked < StandardError; end
-class MediaWithoutVideo < StandardError; end
+require_relative 'media_errors'
 
 CommandResult = Struct.new(:stdout, :stderr, :status, :timed_out, :limit_exceeded, keyword_init: true)

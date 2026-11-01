@@ -113,13 +113,24 @@ Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (th
 
 ### Video format selection
 
+Instagram first probes and downloads without account cookies, ignoring external
+yt-dlp configuration and browser cookies. If extraction/download fails, it retries
+once with the configured `YTDLP_COOKIES_FILE` or `YTDLP_COOKIES_FROM_BROWSER`.
+Anonymous success never opens the configured cookie jar. No credentials means no
+duplicate attempt. Timeouts, duration/size limits, local failures, and confirmed
+posts without video do not trigger an authenticated retry. Only the final failure
+reaches the chat. A known Instagram audience restriction remains visible even if
+the authenticated fallback returns an uninformative HTTP 400. This does not change
+Instagram account settings or guarantee access to restricted posts.
+
 The shared downloader prefers combined MP4 files, then merges separate video and
 audio tracks with ffmpeg. It can also download genuinely silent videos, but never
 selects an audio-only format. Height/size/time limits and the first-video-only rule
 are unchanged. Instagram still prefers original resolution; `YTDLP_FORMAT` still
 overrides the built-in selectors. Threads retains its own progressive selector.
 
-Run `ruby test/ytdlp_download_test.rb` for command/limit coverage and
+Run `ruby test/instagram_download_test.rb` for anonymous-first/fallback coverage,
+`ruby test/ytdlp_download_test.rb` for command/limit coverage, and
 `python3 test/ytdlp_formats_test.py` in yt-dlp's Python environment for actual
 format selection, including an old-selector regression fixture.
 `python3 test/ytdlp_merge_smoke.py` exercises the Ruby downloader, real yt-dlp and

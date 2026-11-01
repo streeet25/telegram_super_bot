@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'media_errors'
+
 def find_executable(executable_name)
   ENV["PATH"].split(File::PATH_SEPARATOR).each do |dir|
     path = File.join(dir, executable_name)
@@ -263,8 +265,20 @@ def ytdlp_no_video?(error_output)
   )
 end
 
+def ytdlp_failure_reason(error_output, source_name:)
+  return unless source_name == 'Instagram'
+
+  :audience_restricted if error_output.match?(/(?:isn.t available to everyone|unavailable for certain audiences|can.t be seen by certain audiences|sensitive content preferences|content may be inappropriate)/i)
+end
+
+def ytdlp_filesize_failure?(error_output)
+  error_output.to_s.match?(/File is larger than max-filesize|larger than max-filesize|maximum file size/i)
+end
+
 def ytdlp_metadata_failure_message(error_output, source_name:)
-  if source_name == 'Threads'
+  if ytdlp_failure_reason(error_output, source_name: source_name) == :audience_restricted
+    'Instagram ограничил доступ к этому ролику для части аудитории. Не удалось скачать видео с доступными настройками доступа.'
+  elsif source_name == 'Threads'
     'Не удалось прочитать пост Threads. Он может быть закрыт, удалён или временно недоступен. Попробуй прямую ссылку вида threads.com/@имя/post/код.'
   elsif ytdlp_auth_failure?(error_output)
     "Не удалось получить видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
@@ -274,13 +288,15 @@ def ytdlp_metadata_failure_message(error_output, source_name:)
 end
 
 def ytdlp_download_failure_message(error_output, source_name:)
-  if ytdlp_auth_failure?(error_output)
+  if ytdlp_failure_reason(error_output, source_name: source_name) == :audience_restricted
+    ytdlp_metadata_failure_message(error_output, source_name: source_name)
+  elsif ytdlp_auth_failure?(error_output)
     if source_name == 'Threads'
       'Threads временно не отдаёт видео. Попробуй позже; доступны только публичные посты.'
     else
       "Не удалось скачать видео из #{source_name}: похоже, нужны актуальные cookies для yt-dlp."
     end
-  elsif error_output.match?(/File is larger than max-filesize|larger than max-filesize|maximum file size/i)
+  elsif ytdlp_filesize_failure?(error_output)
     "Видео не удалось уложить в лимит скачивания. Попробуй ссылку на более короткое видео или увеличь YTDLP_MAX_FILESIZE_MB."
   else
     "yt-dlp не смог скачать подходящий формат видео. Проверь свежесть yt-dlp и лог ошибки."
@@ -313,7 +329,12 @@ def probe_ytdlp_media_info(ytdlp_path, post_url, cookie_args, require_success: f
     error_output = command_error_output(result)
     puts "yt-dlp metadata error: #{error_output}" unless error_output.empty?
     raise MediaWithoutVideo, "Пост без видео, пропускаю." if ytdlp_no_video?(error_output)
-    raise MediaDownloadBlocked, ytdlp_metadata_failure_message(error_output, source_name: source_name) if require_success
+    if require_success
+      raise YtdlpExtractionFailed.new(
+        ytdlp_metadata_failure_message(error_output, source_name: source_name),
+        reason: ytdlp_failure_reason(error_output, source_name: source_name)
+      )
+    end
 
     return nil
   end
@@ -419,7 +440,7 @@ def download_video_with_ytdlp(
     extra_args: extra_args
   )
   unless media_info
-    raise MediaDownloadBlocked, "Не удалось получить метаданные видео через yt-dlp." if require_success
+    raise YtdlpExtractionFailed, "Не удалось получить метаданные видео через yt-dlp." if require_success
 
     return nil
   end
@@ -436,6 +457,7 @@ def download_video_with_ytdlp(
   filesize_limit_arg = download_filesize_limit_arg
   max_dir_bytes = download_dir_limit_bytes
   last_error_output = nil
+  download_limit_hit = false
 
   format_candidates.each do |format|
     tmp_dir = Dir.mktmpdir(tmp_prefix)
@@ -473,6 +495,10 @@ def download_video_with_ytdlp(
       raise MediaDownloadBlocked, "Файл стал слишком большим во время загрузки, пропускаю."
     end
 
+    # yt-dlp can report --max-filesize as a successful skip with no output file.
+    # Smaller formats may still fit, but never retry this safety stop with cookies.
+    download_limit_hit ||= ytdlp_filesize_failure?(result.stdout) || ytdlp_filesize_failure?(result.stderr)
+
     unless result.status&.success?
       error_output = command_error_output(result)
       puts "yt-dlp error (format #{format}): #{error_output}" unless error_output.empty?
@@ -505,19 +531,55 @@ def download_video_with_ytdlp(
     raise MediaDownloadBlocked, "Видео не удалось уложить в лимит #{YTDLP_MAX_FILESIZE_MB} МБ, пропускаю."
   end
 
-  raise MediaDownloadBlocked, ytdlp_download_failure_message(last_error_output.to_s, source_name: source_name) if require_success
+  if download_limit_hit
+    raise MediaDownloadBlocked, ytdlp_download_failure_message('File is larger than max-filesize', source_name: source_name)
+  end
+
+  if require_success
+    raise YtdlpExtractionFailed.new(
+      ytdlp_download_failure_message(last_error_output.to_s, source_name: source_name),
+      reason: ytdlp_failure_reason(last_error_output.to_s, source_name: source_name)
+    )
+  end
 
   nil
 end
 
 def download_instagram_video_with_ytdlp(post_url)
-  download_video_with_ytdlp(
-    post_url,
-    "ig_video_",
-    require_success: !ENABLE_INSTAGRAM_LEGACY_FETCH,
-    source_name: "Instagram",
-    format_candidates: instagram_ytdlp_formats
-  )
+  return nil if ENABLE_INSTAGRAM_LEGACY_FETCH && !find_executable('yt-dlp')
+
+  options = { require_success: true, source_name: 'Instagram', format_candidates: instagram_ytdlp_formats }
+  begin
+    # Ignore external configs too: otherwise a configured cookie file/browser
+    # could silently authenticate what is meant to be a public-only attempt.
+    return download_video_with_ytdlp(
+      post_url, 'ig_video_', **options, use_cookies: false,
+      extra_args: ['--ignore-config', '--no-cookies', '--no-cookies-from-browser']
+    )
+  rescue YtdlpExtractionFailed => error
+    anonymous_error = error
+  end
+
+  if ytdlp_cookie_args.empty?
+    return nil if ENABLE_INSTAGRAM_LEGACY_FETCH
+
+    raise anonymous_error
+  end
+
+  puts 'Instagram anonymous extraction failed; retrying once with configured cookies.'
+  begin
+    download_video_with_ytdlp(
+      post_url, 'ig_video_', **options, use_cookies: true, extra_args: ['--ignore-config']
+    )
+  rescue YtdlpExtractionFailed => authenticated_error
+    return nil if ENABLE_INSTAGRAM_LEGACY_FETCH
+
+    # Authenticated metadata can fail with a bare HTTP 400. Preserve the known
+    # audience restriction instead of replacing it with a generic version hint.
+    raise anonymous_error if anonymous_error.reason == :audience_restricted && authenticated_error.reason.nil?
+
+    raise
+  end
 end
 
 def download_instagram_video(post_url)

@@ -25,17 +25,19 @@ class YtdlpDownloadTest < Minitest::Test
     @dirs.each { |dir| FileUtils.remove_entry(dir) if Dir.exist?(dir) }
   end
 
-  def download(outcome = :success)
+  def download(outcome = :success, use_cookies: true, extra_args: [])
     runner = lambda do |*args, **limits|
       @calls << [args, limits]
       if (index = args.index('-o'))
         file = args[index + 1].sub('%(id)s.%(ext)s', 'fixture.mp4')
         @dirs << File.dirname(file)
-        File.write(file, 'merged fixture')
-        OpenStruct.new(status: OpenStruct.new(success?: outcome == :success), stdout: '', stderr: '',
+        File.write(file, 'merged fixture') unless outcome == :filesize_skip
+        output = [:filesize_error, :filesize_skip].include?(outcome) ? 'File is larger than max-filesize' : ''
+        OpenStruct.new(status: OpenStruct.new(success?: [:success, :filesize_skip].include?(outcome)), stdout: output, stderr: '',
                        timed_out: outcome == :timeout, limit_exceeded: outcome == :limit)
       else
-        OpenStruct.new(status: OpenStruct.new(success?: true), stdout: '{"id":"fixture"}', timed_out: false)
+        OpenStruct.new(status: OpenStruct.new(success?: outcome != :probe_error), stdout: '{"id":"fixture"}',
+                       stderr: outcome == :probe_error ? 'HTTP Error 400: Bad Request' : '', timed_out: false)
       end
     end
     stub(:find_executable, '/usr/bin/yt-dlp') do
@@ -46,7 +48,8 @@ class YtdlpDownloadTest < Minitest::Test
               stub(:download_dir_limit_bytes, 300 * 1024 * 1024) do
                 stub(:prepare_video_for_telegram, ->(file, _limit) { file }) do
                   stub(:run_command_with_limits, runner) do
-                    download_video_with_ytdlp('https://example.invalid/post', 'yt_formats_', require_success: true)
+                    download_video_with_ytdlp('https://example.invalid/post', 'yt_formats_', require_success: true,
+                                             use_cookies: use_cookies, extra_args: extra_args)
                   end
                 end
               end
@@ -92,5 +95,44 @@ class YtdlpDownloadTest < Minitest::Test
     assert_raises(MediaDownloadBlocked) { download(:timeout) }
     assert_equal 1, @dirs.size
     refute Dir.exist?(@dirs.first)
+  end
+
+  def test_anonymous_flags_reach_both_probe_and_download
+    flags = ['--ignore-config', '--no-cookies', '--no-cookies-from-browser']
+    download(use_cookies: false, extra_args: flags)
+    assert_equal 2, @calls.size
+    @calls.each do |args, _|
+      flags.each { |flag| assert_includes args, flag }
+      refute_includes args, '--cookies'
+      refute_includes args, '--cookies-from-browser'
+      refute_includes args, '/private/cookies.txt'
+    end
+  end
+
+  def test_metadata_error_is_retryable_but_does_not_download
+    assert_raises(YtdlpExtractionFailed) { download(:probe_error) }
+    assert_equal 1, @calls.size
+    assert_empty @dirs
+  end
+
+  def test_exhausted_formats_are_retryable_and_all_partial_files_are_removed
+    assert_raises(YtdlpExtractionFailed) { download(:format_error) }
+    assert_equal default_ytdlp_formats.size, @dirs.size
+    @dirs.each { |dir| refute Dir.exist?(dir) }
+  end
+
+  def test_ytdlp_filesize_error_is_not_an_authenticated_retry_candidate
+    error = assert_raises(MediaDownloadBlocked) { download(:filesize_error) }
+    refute_kind_of YtdlpExtractionFailed, error
+    assert_match(/лимит скачивания/, error.message)
+    assert_equal default_ytdlp_formats.size, @dirs.size
+    @dirs.each { |dir| refute Dir.exist?(dir) }
+  end
+
+  def test_ytdlp_successful_filesize_skip_is_also_a_safety_stop
+    error = assert_raises(MediaDownloadBlocked) { download(:filesize_skip) }
+    refute_kind_of YtdlpExtractionFailed, error
+    assert_equal default_ytdlp_formats.size, @dirs.size
+    @dirs.each { |dir| refute Dir.exist?(dir) }
   end
 end
