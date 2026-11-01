@@ -9,7 +9,42 @@ The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
-## Active release — Twitter text-only posts (2026-11-01)
+## Active release — Twitter GIF animations (2026-11-01)
+
+`videomorph:twitter-gif-20261101`, pinned as
+`sha256:4eecad3fd6a9b8886adca8ee804df253b1ac6499ae8b8258c9c0fa6b6db0002b`,
+adds source commit `9846095` on top of the Twitter text-only image below. The
+commit was pushed before deployment. Dependencies, environment, credentials and
+the existing seven state files were preserved; yt-dlp remains `2026.10.26`.
+
+Twitter's native `animated_gif` media type now survives extraction as a per-entry
+marker. The bot sends these silent MP4s through `sendAnimation`, including manual
+channel publication by animation file ID. Ordinary unmarked GIFs stay private
+until **Опубликовать в Побочку** is pressed, even after general consent or restart.
+`+` retains immediate explicit one-off permission; `-` retains exclusion until an
+explicit later button click. Mixed batches preserve order, with animations sent
+individually and only adjacent ordinary videos grouped into albums. GIF IDs do
+not enter video-album history. Deduplication, bans, clean captions and preferences
+are unchanged. Follow the GIF downgrade precautions under runtime notes below
+before rolling back to a pre-GIF image.
+
+The final candidate passed 195 Ruby tests, 33 Python tests, three native Telegram
+serialization smokes (including multipart GIF upload, actual Animation callback
+types and anonymous file-ID publication) and the real yt-dlp/ffmpeg merge smoke.
+These checks used no external network or production state; no live GIF URL was
+provided, and no test messages or announcements were sent to Telegram.
+
+An initial post-start validation assertion triggered a rollback; the exact failed
+assertion was not retained. The old service was confirmed healthy before retrying
+with environment/mount comparisons independent of enumeration order. Final
+rollout succeeded at `2026-11-01 13:27:18 UTC`. Its private backup and sanitized
+result are in `/etc/videomorph/runtime-backups/twitter-gif-20261101T132718Z/`.
+The earlier attempt's backup `twitter-gif-20261101T132333Z` is also retained.
+Post-start `getMe` confirmed the same bot identity; service, worker and feed startup
+were healthy, with no startup/polling-conflict markers and `NRestarts=0`. All six
+runtime source hashes matched the committed files. No old state was restored.
+
+## Previous release — Twitter text-only posts (2026-11-01)
 
 `videomorph:twitter-text-20261101`, pinned as
 `sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`,
@@ -109,7 +144,7 @@ anonymous-first behavior.
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the active image by digest, as recorded above. The previous image, `videomorph:instagram-anonymous-20261101` (`sha256:c1992410029366016bf8f915d9c4282d26c7a1dc2e0c2f9b5f915ce155701a91`), is retained on the active host for rollback. The older `videomorph:clean-captions-20261016` (`sha256:81e746593e05947612c1dcefd0a619baed0a6335372c445c1f2c47968d81efbe`) also remains, but lacks the Instagram fixes. These images understand the current button state; see the unpublished-control migration below before starting an older pre-button image.
+- The launcher pins the active image by digest, as recorded above. The previous `videomorph:twitter-text-20261101` (`sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`) and older Instagram/clean-caption release images remain on this host. They do not support animation publication: follow the GIF downgrade precautions below before using them. Pre-button images additionally require the unpublished-control migration.
 
 The clean-caption release no longer appends publication status to video captions,
 including after publication, cancellation, consent or a duplicate result. Controls
