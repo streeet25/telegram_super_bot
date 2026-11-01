@@ -9,7 +9,54 @@ The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
-## Active release — Twitter GIF animations (2026-11-01)
+## Active release — upload size / HTTP 413 protection (2026-11-01)
+
+`videomorph:upload413-20261101`, pinned as
+`sha256:13844c562c2199d03a8b52a4ccdbad16a643050e9ab827faccd4e1f0d8c90eea`,
+adds source commit `9960c87` on top of the GIF release below. The commit was
+pushed before rollout. Dependencies, cookies, environment and all seven state
+files were preserved; yt-dlp remains `2026.10.26`.
+
+The public API upload limit now has a safe 49 MiB ceiling, including with the
+existing environment value `YTDLP_MAX_FILESIZE_MB=96`. Lower positive limits are
+respected. Oversized singles are compressed before upload. A structured Telegram
+or HTTP 413 allows exactly one further, smaller encode and upload attempt;
+ambiguous timeouts and unrelated errors are never retried. Only confirmed sends
+enter history and feed controls. Original and compressed fingerprints remain
+available for deduplication. Repeated size rejection returns a plain explanation,
+not the raw API error. Albums are not automatically retried or split. GIF manual
+publication, privacy choices, clean captions and all earlier behavior are retained.
+
+The candidate passed 204 Ruby tests, 33 Python tests, four native Telegram
+serialization smokes and one real yt-dlp/ffmpeg merge smoke without network or
+production state. The new smoke uses real multipart serialization, a stubbed 413
+response and real ffmpeg to verify a smaller retry, exactly-once history/feed
+effects, cleanup and no timeout retry. No Telegram test sends or announcements
+were performed.
+
+The reported Instagram reel `De_3fLgR-DS` downloaded successfully as a
+7,692,939-byte, 73.794-second, 406×720 H.264/AAC MP4. Its original failed upload
+size was not logged; the reported live 413 was not reproduced and its exact
+cause remains unconfirmed. A simulated 413 on this downloaded file produced one
+3,495,258-byte, 270×480 Telegram-ready retry file. This was a download/compression
+check only, not an actual Telegram upload.
+
+Rollout succeeded at `2026-11-01 14:00:38 UTC`. Private pre-release snapshots and
+the sanitized result are retained in
+`/etc/videomorph/runtime-backups/upload413-20261101T140037Z/`. Post-start `getMe`
+confirmed the same bot; the service, workers and feed were healthy, with no startup
+or polling-conflict markers and `NRestarts=0`. Runtime source hashes matched the
+commit, and the live effective upload cap was verified as 49 MiB. The existing
+environment value did not need changing. The temporary test/build directory and
+downloaded test media were removed after verification.
+
+Rollback can pin the retained GIF image below and restart through systemd; it
+understands the same state schema, so no state migration or snapshot restoration
+is needed. That older image does not clamp the legacy 96 MiB setting: explicitly
+use `YTDLP_MAX_FILESIZE_MB=49` if rolling back. Do not restore old state over newer
+user activity. Older pre-GIF images still require the downgrade precautions below.
+
+## Previous release — Twitter GIF animations (2026-11-01)
 
 `videomorph:twitter-gif-20261101`, pinned as
 `sha256:4eecad3fd6a9b8886adca8ee804df253b1ac6499ae8b8258c9c0fa6b6db0002b`,
@@ -144,7 +191,7 @@ anonymous-first behavior.
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the active image by digest, as recorded above. The previous `videomorph:twitter-text-20261101` (`sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`) and older Instagram/clean-caption release images remain on this host. They do not support animation publication: follow the GIF downgrade precautions below before using them. Pre-button images additionally require the unpublished-control migration.
+- The launcher pins the active image by digest, as recorded above. The preceding `videomorph:twitter-gif-20261101` image supports the current state schema; see its upload-cap rollback note above. The older `videomorph:twitter-text-20261101` (`sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`) and Instagram/clean-caption images also remain. They do not support animation publication: follow the GIF downgrade precautions below before using them. Pre-button images additionally require the unpublished-control migration.
 
 The clean-caption release no longer appends publication status to video captions,
 including after publication, cancellation, consent or a duplicate result. Controls

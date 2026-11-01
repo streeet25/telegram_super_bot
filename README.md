@@ -147,6 +147,11 @@ History, feed controls and publication are created only after confirmed delivery
 Repeated size rejection or failed compression returns a short explanation, not
 the raw API error. Albums are not blindly retried or split after rejection.
 
+Run `ruby test/media_upload_limits_test.rb` for the size/retry policy. With the
+application gems and ffmpeg installed, `bundle exec ruby
+test/media_upload_telegram_smoke.rb` also exercises real compression and Telegram
+multipart serialization against a stubbed 413 response, without network sends.
+
 Instagram first probes and downloads without account cookies, ignoring external
 yt-dlp configuration and browser cookies. If extraction/download fails, it retries
 once with the configured `YTDLP_COOKIES_FILE` or `YTDLP_COOKIES_FROM_BROWSER`.
