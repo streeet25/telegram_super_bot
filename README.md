@@ -109,6 +109,16 @@ Use commands by mentioning the bot in a Telegram group chat. In private chat, th
 
 Plain Twitter/X, Instagram, Threads, and YouTube Shorts links are processed as video links. Telegram post links are ignored. Spotify track links are resolved to a concrete YouTube video link; the bot does not download or send audio files. Threads uses the same per-video buttons, `+`/`-` choices, 30-second default publication window, and duplicate checks as other providers.
 
+Twitter/X text/photo-only posts are silently skipped, including ordinary external
+links and article-preview cards: the downloader does not follow those links to
+look for a video on another site. Native videos, GIFs and real player cards keep
+their existing behavior, with the post's own video ahead of quoted media. Actual
+access, network and downloader failures are still reported. This uses the bundled
+`videomorph_twitter.py` extractor in `ytdlp_plugins`; preserve that directory when
+deploying. Run `ruby test/twitter_no_video_test.rb` and
+`python3 test/twitter_extractor_test.py` (in yt-dlp's Python environment) for
+offline regression coverage, including the upstream article-redirect failure.
+
 Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (the latter needs the same Python environment as yt-dlp) for offline Threads coverage, plus the existing feed and native Telegram smoke tests. Live verification should call the downloader without sending messages or publishing to the channel.
 
 ### Video format selection

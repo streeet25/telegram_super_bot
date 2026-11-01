@@ -85,11 +85,15 @@ Telegram's HTTP 400 "message is not modified" during refresh is a harmless no-op
 other UI failures remain logged. Existing captions are cleaned only when their
 controls are refreshed, with no startup history sweep, data migration or broadcast.
 
-The Threads release adds `/opt/app/ytdlp_plugins/videomorph/yt_dlp_plugins/extractor/videomorph_threads.py`.
-Preserve this directory in the image, not just Ruby files. Only Threads calls enable
-it through `--plugin-dirs`; other providers keep their existing extractor/cookie
-behavior. It uses public preview data without the Instagram cookie jar. Verify
-with `/opt/venv/bin/python /opt/app/test/threads_extractor_test.py` (the system
+The bundled directory `/opt/app/ytdlp_plugins/videomorph/yt_dlp_plugins/extractor/`
+contains `videomorph_threads.py` and `videomorph_twitter.py`. Preserve it in the
+image, not just Ruby files. Threads and Twitter calls explicitly enable it through
+`--plugin-dirs`; each plugin only matches its own provider. Threads uses public
+preview data without the Instagram cookie jar. Twitter preserves its existing
+cookies and `--extractor-args twitter:...` settings, while skipping text/article
+links instead of attempting to download an unrelated external page. Real access
+and network failures remain visible. Verify with `/opt/venv/bin/python
+/opt/app/test/threads_extractor_test.py` and `twitter_extractor_test.py` (the system
 Python does not include yt-dlp), the Ruby tests and both Telegram smoke tests.
 The supplied `katia_lok/DeWshaKHBhY` post downloaded as a 12-second 720×1280 MP4
 in the candidate without Telegram sends. No data migration or announcement is

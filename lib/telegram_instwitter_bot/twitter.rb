@@ -96,5 +96,10 @@ def download_twitter_video(twitter_url)
     raise MediaDownloadBlocked, "Поддерживаю только ссылки на твиты. Twitter/X broadcast/live URL пропускаю."
   end
 
-  download_video_with_ytdlp(normalized_url, "tw_video_", require_success: true, source_name: "Twitter/X")
+  # The local extractor skips text/article links instead of asking yt-dlp to
+  # extract a video from an unrelated external page. Credentials stay unchanged.
+  download_video_with_ytdlp(
+    normalized_url, "tw_video_", require_success: true, source_name: "Twitter/X",
+    extra_args: ['--no-plugin-dirs', '--plugin-dirs', File.expand_path('../../ytdlp_plugins', __dir__)]
+  )
 end
