@@ -9,6 +9,40 @@ The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
+## Prepared, NOT deployed — reaction/update routing (2026-11-04)
+
+Local source commit `74af374` prevents edited-message and reaction updates from
+re-entering the ordinary message handler. `TelegramUpdateClient` subscribes to
+new messages, channel/business messages and callbacks, and also filters pending
+updates locally while advancing their offsets. Genuine text/URL edits do not
+start a new download; the user must send a new message. Callback payloads remain
+eligible even when their nested message has an `edit_date`. No state migration,
+history replay or pending-update reset is involved.
+
+Candidate `videomorph:reaction-routing-20261104` is
+`sha256:044cb56df3e2b29ec5d4119a88413be597b18519fd4baafe27744333f862ae65`.
+Its isolated build and test report are retained at
+`/root/videomorph-reaction-u73wnd9a/{build,checks}` on `2.24.29.59`.
+All 204 Ruby tests, 33 Python tests, five native Telegram serialization smokes
+and the real yt-dlp/ffmpeg merge smoke passed with no network or production-state
+mounts. The new smoke reproduces the old edited-message route and checks reactions,
+removal/count updates, metadata edits without `edit_date`, restart, new messages,
+photos, callbacks and polling offsets. No test sends or announcements were made.
+
+Deployment is pending GitHub access or explicit permission to deploy before push.
+Both existing personal/lighthouse SSH identities were rejected, HTTPS has no
+configured credentials, and the connected `lighthouse25` GitHub account reports
+read-only access to this repository. Do not claim this candidate is live or pushed.
+Production remains the upload413 image below; its launcher/environment/cookies
+and state were not changed or restarted for this preparation. Read-only checks
+found `NRestarts=4` accumulated before this task, no polling-conflict/OOM markers,
+and prior network/API exceptions. A rollout must recheck current ownership and
+runtime, push first unless the owner explicitly overrides that order, and use the
+usual private state backup plus atomic launcher-digest switch through systemd.
+Rollback to upload413 requires no state conversion. Telegram remembers the
+`allowed_updates` subscription: that older client omits the option and therefore
+inherits the last subscription if rolled back. Do not reset pending updates.
+
 ## Active release — upload size / HTTP 413 protection (2026-11-01)
 
 `videomorph:upload413-20261101`, pinned as
