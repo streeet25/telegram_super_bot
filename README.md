@@ -134,6 +134,18 @@ Offline coverage: `ruby test/twitter_gif_test.rb` and
 
 Run `ruby test/threads_test.rb` and `python3 test/threads_extractor_test.py` (the latter needs the same Python environment as yt-dlp) for offline Threads coverage, plus the existing feed and native Telegram smoke tests. Live verification should call the downloader without sending messages or publishing to the channel.
 
+### New messages and reactions
+
+Only new messages start downloads. Emoji reactions, reaction counts and edited
+versions of old messages are ignored before dispatch, including updates already
+pending at rollout and after restarts. Telegram can send an `edited_message` for
+metadata changes without changing its text; see the
+[Update contract](https://core.telegram.org/bots/api#update). New channel/business
+messages and inline buttons remain supported. To retry a link or use an edited
+URL, send it as a new message. No pending-update reset or chat history scan is used.
+Run `bundle exec ruby test/update_routing_telegram_smoke.rb` to verify this boundary
+with the installed Telegram types and a local HTTP stub, without network sends.
+
 ### Video format selection
 
 Public Telegram uploads are capped at 49 MiB, leaving headroom below the documented

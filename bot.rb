@@ -6,11 +6,11 @@
 STDOUT.sync = true
 STDERR.sync = true
 
-%w[config runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts threads time_locations media_jobs photo_posts video_feed onboarding].each do |file|
+%w[config update_routing runtime_helpers reminders spotify_youtube instagram ytdlp twitter youtube_shorts threads time_locations media_jobs photo_posts video_feed onboarding].each do |file|
   require_relative File.join("lib", "telegram_instwitter_bot", file)
 end
 
-Telegram::Bot::Client.run(TOKEN) do |bot|
+TelegramUpdateClient.run(TOKEN) do |bot|
   puts "Bot started..."
 
   # Fetch bot info to know its username.
