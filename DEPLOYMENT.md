@@ -9,7 +9,51 @@ The previous host `root@5.61.91.77` was rechecked on 2026-11-01: its service is
 inactive/disabled, with no bot container or `bot.rb` process. Do not start that
 retired instance or update its credentials; the active consumer is on `2.24.29.59`.
 
-## Prepared, NOT deployed — reaction/update routing (2026-11-04)
+## Active release — YouTube up to five minutes and reaction routing (2026-11-06)
+
+`videomorph:youtube-5min-20261106`, pinned as
+`sha256:df7469c3d93c0cca9d3d00aa54a77da903331184e2b9c9eb1f44168897d54c3b`,
+contains source commit `9a628e7` and the previously prepared reaction fix
+`74af374`. GitHub SSH authentication as `streeet25` worked again on November 6;
+all pending commits were pushed before deployment. Dependencies, environment,
+credentials, mounts and all seven state files were preserved.
+
+YouTube watch, short-share, Shorts and embed links use the existing download and
+publication pipeline. Only individual videos are selected, with a hard ceiling
+of 300 seconds checked in metadata and again against the downloaded file.
+Unknown duration fails closed; overlong videos are rejected, not trimmed. Existing
+live-stream restrictions, upload compression and download resource limits remain.
+Equivalent YouTube links share a stable video-ID dedup key compatible with old
+Shorts receipts. In-message variants merge before consent, with minus winning.
+Privacy, buttons, 30-second delay, moderation and anonymous feed publication are
+unchanged. Unavailable YouTube videos return a visible explanation, not the
+text-only Twitter silent-skip behavior.
+
+The final image passed 216 Ruby tests, 33 Python tests, five native Telegram
+serialization smokes and one real yt-dlp/ffmpeg merge smoke with no network or
+production state. No real Telegram test sends or announcements were performed.
+Live download verification is **not successful yet**: the public test ID
+`BaW_jenozKc` was unavailable, and the public short video `jNQXAC9IVRw` returned
+YouTube's sign-in/bot-confirmation requirement from this server. These checks used
+no cookies and sent nothing to Telegram. No YouTube credentials were installed;
+Instagram cookies were not modified. Obtain an authorized YouTube cookie file
+and keep it separate from Instagram before claiming a verified live download.
+
+Rollout succeeded at `2026-11-06 10:16:29 UTC`. Private snapshots, suite results
+and sanitized rollout/health reports are retained at
+`/etc/videomorph/runtime-backups/youtube-5min-20261106T101628Z/`.
+Post-start `getMe` confirmed the same bot. Service, media workers and feed were
+healthy, with no startup/polling-conflict markers and `NRestarts=0`; the effective
+300-second YouTube limit, 49 MiB upload limit and new update subscription were
+verified in the running image. The current task's temporary build/check files
+were removed after verification; the earlier reaction preparation is retained.
+
+Rollback may pin the retained upload413 image below through systemd. No state
+migration or restoration is needed; do not replace newer user activity with an
+old snapshot. The old client inherits Telegram's last `allowed_updates` filter;
+do not reset pending updates. That rollback removes regular YouTube handling.
+
+## Preparation history — reaction/update routing (2026-11-04)
 
 Local source commit `74af374` prevents edited-message and reaction updates from
 re-entering the ordinary message handler. `TelegramUpdateClient` subscribes to
@@ -29,21 +73,12 @@ mounts. The new smoke reproduces the old edited-message route and checks reactio
 removal/count updates, metadata edits without `edit_date`, restart, new messages,
 photos, callbacks and polling offsets. No test sends or announcements were made.
 
-Deployment is pending GitHub access or explicit permission to deploy before push.
-Both existing personal/lighthouse SSH identities were rejected, HTTPS has no
-configured credentials, and the connected `lighthouse25` GitHub account reports
-read-only access to this repository. Do not claim this candidate is live or pushed.
-Production remains the upload413 image below; its launcher/environment/cookies
-and state were not changed or restarted for this preparation. Read-only checks
-found `NRestarts=4` accumulated before this task, no polling-conflict/OOM markers,
-and prior network/API exceptions. A rollout must recheck current ownership and
-runtime, push first unless the owner explicitly overrides that order, and use the
-usual private state backup plus atomic launcher-digest switch through systemd.
-Rollback to upload413 requires no state conversion. Telegram remembers the
-`allowed_updates` subscription: that older client omits the option and therefore
-inherits the last subscription if rolled back. Do not reset pending updates.
+This candidate was not deployed independently: on November 4 both SSH identities
+were rejected, HTTPS lacked credentials and the connected GitHub account had
+read-only access. No production restart occurred that day. Its code was pushed
+and deployed together with YouTube support on November 6, as recorded above.
 
-## Active release — upload size / HTTP 413 protection (2026-11-01)
+## Previous release — upload size / HTTP 413 protection (2026-11-01)
 
 `videomorph:upload413-20261101`, pinned as
 `sha256:13844c562c2199d03a8b52a4ccdbad16a643050e9ab827faccd4e1f0d8c90eea`,
@@ -225,7 +260,7 @@ anonymous-first behavior.
 - Cookies file: `/etc/videomorph/cookies/cookies.txt` on the host, available at `/run/videomorph/cookies.txt` inside the container
 - The cookies directory is mounted read-write because yt-dlp updates its cookie jar. Keep the file mode `0600`, owned by the container user `10001:10001`.
 - Supervisor: `videomorph.service`, which runs `/usr/local/libexec/videomorph-run.py`
-- The launcher pins the active image by digest, as recorded above. The preceding `videomorph:twitter-gif-20261101` image supports the current state schema; see its upload-cap rollback note above. The older `videomorph:twitter-text-20261101` (`sha256:b392e9028f6bda18e9cc2d494898aa13fa71048cff3c80374204aeca4cea9214`) and Instagram/clean-caption images also remain. They do not support animation publication: follow the GIF downgrade precautions below before using them. Pre-button images additionally require the unpublished-control migration.
+- The launcher pins the active image by digest, as recorded above. The preceding `videomorph:upload413-20261101` image supports the current state schema and is the immediate rollback target. The retained GIF image also supports this state, but needs the upload-cap precaution recorded above. Older Twitter-text/Instagram/clean-caption images do not support animation publication: follow the GIF downgrade precautions below before using them. Pre-button images additionally require the unpublished-control migration.
 
 The clean-caption release no longer appends publication status to video captions,
 including after publication, cancellation, consent or a duplicate result. Controls
