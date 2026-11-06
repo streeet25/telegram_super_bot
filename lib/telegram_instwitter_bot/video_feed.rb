@@ -7,6 +7,7 @@ require 'securerandom'
 require 'uri'
 require 'thread'
 require_relative 'video_fingerprint'
+require_relative 'youtube'
 
 class VideoFeedError < StandardError; end
 
@@ -464,8 +465,8 @@ def video_feed_keys(link, path)
                 "x:#{match[1]}"
               elsif host == 'instagram.com' && (match = uri.path.match(%r{\A/(?:reel|reels|p|tv)/([^/]+)}))
                 "ig:#{match[1]}"
-              elsif host == 'youtube.com' && (match = uri.path.match(%r{\A/shorts/([^/]+)}))
-                "yt:#{match[1]}"
+              elsif (youtube = youtube_video_reference(link))
+                "yt:#{youtube[:id]}"
               elsif %w[threads.com threads.net].include?(host) && (match = uri.path.match(%r{\A/(?:@[^/]+/post|t)/([A-Za-z0-9_-]+)/?\z}))
                 "threads:#{match[1]}"
               else

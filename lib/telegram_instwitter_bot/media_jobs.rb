@@ -3,6 +3,7 @@
 require_relative 'threads'
 require_relative 'media_limits'
 require_relative 'media_errors'
+require_relative 'youtube'
 
 def telegram_upload_too_large?(error)
   data = error.respond_to?(:data) ? error.data : nil
@@ -57,7 +58,8 @@ end
 def media_source_for_link(link)
   return :twitter if link.match?(TWITTER_REGEX)
   return :instagram if link.match?(INSTAGRAM_REGEX)
-  return :youtube_shorts if link.match?(YOUTUBE_SHORTS_REGEX)
+  youtube = youtube_video_reference(link)
+  return youtube[:shorts] ? :youtube_shorts : :youtube if youtube
   return :threads if link.match?(THREADS_REGEX)
 
   nil
@@ -74,6 +76,10 @@ def extract_video_link_items(text)
     link = clean_media_link(raw_link)
     source = media_source_for_link(link)
     next unless source
+    # Share links and watch/Shorts variants represent the same video. Merge
+    # choices before consent preparation so a minus always wins for that clip.
+    youtube = [:youtube, :youtube_shorts].include?(source) ? youtube_video_reference(link) : nil
+    link = youtube[:url] if youtube
     if seen[link]
       # Conflicting occurrences of the same URL must never override a minus.
       existing = seen[link]
@@ -109,7 +115,7 @@ def cleanup_media_path(path)
   return unless path
 
   dir = File.dirname(path)
-  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|yt_shorts_|threads_video_|tw_shot_)/)
+  if Dir.exist?(dir) && File.basename(dir).match?(/\A(?:tw_video_|ig_video_|yt_shorts_|yt_video_|threads_video_|tw_shot_)/)
     FileUtils.remove_entry(dir)
   elsif File.exist?(path)
     File.delete(path)
@@ -284,7 +290,7 @@ def download_video_item(item)
              media_type = 'animation' if info['videomorph_media_type'] == 'animation'
            end
          when :instagram then download_instagram_video(item.fetch(:link))
-         when :youtube_shorts then download_youtube_shorts_video(item.fetch(:link))
+         when :youtube, :youtube_shorts then download_youtube_video(item.fetch(:link))
          when :threads then download_threads_video(item.fetch(:link))
          end
   return nil unless path

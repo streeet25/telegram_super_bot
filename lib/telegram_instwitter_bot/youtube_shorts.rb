@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'youtube'
+
 def normalize_youtube_shorts_url(shorts_url)
   uri = URI.parse(shorts_url)
   return shorts_url unless uri.host
@@ -31,10 +33,5 @@ def download_youtube_shorts_video(shorts_url)
     raise MediaDownloadBlocked, "Поддерживаю только ссылки на YouTube Shorts."
   end
 
-  download_video_with_ytdlp(
-    normalized_url,
-    "yt_shorts_",
-    require_success: true,
-    source_name: "YouTube Shorts"
-  )
+  download_youtube_video(normalized_url)
 end
